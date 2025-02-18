@@ -65,10 +65,6 @@ function importar_dimensiones() {
     $modificados_parciales = 0;
     $errores = 0;
 
-    // Obtener los encabezados de la primera fila
-    $headers = array_map('strtolower', $datos[0]);
-    $id_categoria_index = array_search('id categoría', $headers);
-
     foreach ($datos as $i => $fila) {
         if ($i == 0) continue; // Saltar encabezados
 
@@ -77,17 +73,20 @@ function importar_dimensiones() {
         $ancho = $fila[2];
         $profundidad = $fila[3];
         $peso = $fila[4];
+        $idcat = $fila[5];
+
+        echo "<p>Categoría: $categoria</p>";
 
         // Buscar categoría por nombre (sin mayúsculas ni acentos)
-        
         $categoria_id = $wpdb->get_var($wpdb->prepare(
             "SELECT term_id FROM {$wpdb->terms} WHERE LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name, 'á', 'a'), 'é', 'e'), 'í', 'i'), 'ó', 'o'), 'ú', 'u'), ' ', '')) = LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(%s, 'á', 'a'), 'é', 'e'), 'í', 'i'), 'ó', 'o'), 'ú', 'u'), ' ', ''))",
             $categoria
         ));
 
         // Si no encontró la categoría y hay ID de categoría en el Excel, buscar por ID
-        if (!$categoria_id && $id_categoria_index !== false) {
-            $categoria_id = $fila[$id_categoria_index];
+        if (!$categoria_id && $idcat !== false) {
+            $categoria_id = intval($idcat);
+            echo "<p style='color:red;'>Buscando id: $idcat</p>";
         }
 
         if (!$categoria_id) {

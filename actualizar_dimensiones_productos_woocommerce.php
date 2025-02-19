@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Actualizar Dimensiones Productos WooCommerce
  * Description: Plugin para actualizar las dimensiones y peso de los productos de WooCommerce desde un archivo Excel.
- * Version: 2.4
+ * Version: 2.5
  * Author: Tu Nombre
  */
 
@@ -46,6 +46,13 @@ function actualizar_dimensiones_pagina() {
                 }
                 echo '</ul></li>';
             }
+             if (!empty($resultados['productos_modificados'])) {
+                echo '<li><strong>Productos Modificados:</strong><ul>';
+                foreach ($resultados['productos_modificados'] as $producto_modificado) {
+                    echo '<li>' . esc_html($producto_modificado) . '</li>';
+                }
+                echo '</ul></li>';
+            }
             echo "</ul>";
         } else {
             echo '<p>Error al procesar el archivo.</p>';
@@ -80,6 +87,7 @@ function importar_dimensiones() {
     $modificados_parciales = 0;
     $errores = 0;
     $detalles_errores = []; // Array para almacenar detalles de los errores
+	$productos_modificados = []; // Array para trackear que productos se modificaron.
     $datos = [];
 
     try {
@@ -230,37 +238,55 @@ function importar_dimensiones() {
             $profundidad_actual = $product->get_height();
             $actualizacion_total = false;
             $actualizacion_parcial = false;
+            $log_producto = "Producto: " . $nombre_producto . " (ID: " . $product_id . ") - ";
+            $modificado = false;
 
             // Solo actualizar si algún valor no está seteado o si es cero
-            if (!$peso_actual || $peso_actual == 0 || !$largo_actual || $largo_actual == 0 || !$ancho_actual || $ancho_actual == 0 || !$profundidad_actual || $profundidad_actual == 0) {
+            if (!$peso_actual || $peso_actual == 0 || (!$largo_actual || $largo_actual == 0) || (!$ancho_actual || $ancho_actual == 0) || (!$profundidad_actual || $profundidad_actual == 0)) {
                 if ((!$peso_actual || $peso_actual == 0) && $peso > 0) {
                     $product->set_weight($peso);
                     $actualizacion_parcial = true;
+                    $log_producto .= "Peso actualizado de " . $peso_actual . " a " . $peso . "; ";
+                    $modificado = true;
                 }
                 if ((!$largo_actual || $largo_actual == 0)  && $largo > 0) {
                     $product->set_length($largo);
                     $actualizacion_parcial = true;
+                    $log_producto .= "Largo actualizado de " . $largo_actual . " a " . $largo . "; ";
+                     $modificado = true;
                 }
                 if ((!$ancho_actual || $ancho_actual == 0) && $ancho > 0) {
                     $product->set_width($ancho);
                     $actualizacion_parcial = true;
+                    $log_producto .= "Ancho actualizado de " . $ancho_actual . " a " . $ancho . "; ";
+                     $modificado = true;
                 }
                 if ((!$profundidad_actual || $profundidad_actual == 0) && $profundidad > 0) {
                     $product->set_height($profundidad);
                     $actualizacion_parcial = true;
+                    $log_producto .= "Profundidad actualizada de " . $profundidad_actual . " a " . $profundidad . "; ";
+                     $modificado = true;
                 }
 
                 if ((!$peso_actual || $peso_actual == 0) && (!$largo_actual || $largo_actual == 0) && (!$ancho_actual || $ancho_actual == 0) && (!$profundidad_actual || $profundidad_actual == 0)) {
                     $actualizacion_total = true;
                 }
 
-                $product->save();
+                if($modificado){
+                    $product->save();
 
-                if ($actualizacion_total) {
-                    $modificados_totales++;
-                } else {
-                    $modificados_parciales++;
+                    if ($actualizacion_total) {
+                        $modificados_totales++;
+                    } else {
+                        $modificados_parciales++;
+                    }
+
+                     $productos_modificados[] = $log_producto;
                 }
+
+
+            } else {
+                  $detalles_errores[] = "Fila " . $i . ": Producto " . $nombre_producto . " (ID: " . $product_id . ") no necesita actualización.";
             }
         }
     }
@@ -270,6 +296,7 @@ function importar_dimensiones() {
         'parciales' => $modificados_parciales,
         'errores' => $errores,
         'detalles' => $detalles_errores,
+         'productos_modificados' =>  $productos_modificados,
     );
 
     return $resultados; // Retornamos el array con los resultados

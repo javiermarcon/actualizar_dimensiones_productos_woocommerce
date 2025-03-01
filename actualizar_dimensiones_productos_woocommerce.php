@@ -63,6 +63,8 @@ function actualizar_productos_pagina() {
     echo '<form method="post" enctype="multipart/form-data">';
     echo '<input type="file" name="archivo_excel" required> <br />';
     echo '<input type="checkbox" name="actualizar_si" value="1"> Actualizar siempre <br />';
+    echo '<input type="checkbox" name="actualizar_tam" value="1"> Actualizar tamaño de los productos <br />';
+    echo '<input type="checkbox" name="actualizar_cat" value="1"> Actualizar tipo de envio de los productos <br />';
     echo '<input type="submit" name="modificar_productos" value="Importar" class="button button-primary">';
     echo '</form>';
 
@@ -91,6 +93,8 @@ function modificar_productos() {
 	$productos_modificados = []; // Array para trackear que productos se modificaron.
 
     $actualizar_si = isset($_POST['actualizar_si']); // Captura el estado del checkbox
+    $actualizar_tam = isset($_POST['actualizar_tam']);
+    $actualizar_cat = isset($_POST['actualizar_cat']);
 
     try {
         $spreadsheet = IOFactory::load($archivo);
@@ -106,16 +110,18 @@ function modificar_productos() {
             $encabezados[$col] = trim($cell->getFormattedValue());
         }
 
-        $columna_categoria = array_search('Categoría', $encabezados);
-        $columna_largo = array_search('Largo (cm)', $encabezados);
-        $columna_ancho = array_search('Ancho (cm)', $encabezados);
-        $columna_profundidad = array_search('Profundidad (cm)', $encabezados);
-        $columna_peso = array_search('Peso (kg)', $encabezados);
-        $columna_idcat = array_search('ID Categoría', $encabezados);
-
+        $encabezados = array_map('strtolower', $encabezados); // Convertir todos los encabezados a minúsculas
+        $columna_categoria = array_search('categoría', $encabezados);
+        $columna_largo = array_search('largo (cm)', $encabezados);
+        $columna_ancho = array_search('ancho (cm)', $encabezados);
+        $columna_profundidad = array_search('profundidad (cm)', $encabezados);
+        $columna_peso = array_search('peso (kg)', $encabezados);
+        $columna_idcat = array_search('id categoría', $encabezados);
+        $columna_tamaño = array_search('tamaño', $encabezados);
+        echo $columna_categoria . " " . $columna_tamaño;
        // Si no se encuentran los encabezados, mostrar un error y salir
-        if ($columna_categoria === false || $columna_largo === false || $columna_ancho === false || $columna_profundidad === false || $columna_peso === false) {
-            wp_die('No se encontraron los encabezados esperados en el archivo Excel.  Asegúrate de que las columnas tengan los nombres correctos: Categoría, Largo (cm), Ancho (cm), Profundidad (cm), Peso (kg).');
+        if ($columna_categoria === false || (($columna_largo === false && $columna_ancho === false && $columna_profundidad === false && $columna_peso === false) || $columna_tamaño === false)) {
+            wp_die('No se encontraron los encabezados esperados en el archivo Excel.  Asegúrate de que las columnas tengan los nombres correctos: Categoría, Largo (cm), Ancho (cm), Profundidad (cm), Peso (kg), Tamaño.');
         }
 
 
@@ -133,9 +139,10 @@ function modificar_productos() {
             $ancho = ($columna_ancho !== false) ? floatval($hoja->getCell([$columna_ancho, $row])->getFormattedValue()) : 0;
             $profundidad = ($columna_profundidad !== false) ? floatval($hoja->getCell([$columna_profundidad, $row])->getFormattedValue()) : 0;
             $peso = ($columna_peso !== false) ? floatval($hoja->getCell([$columna_peso, $row])->getFormattedValue()) : 0;
+            $tamaño = ($columna_tamaño !== false) ? trim((string)$hoja->getCell([$columna_tamaño, $row])->getFormattedValue()) : null;
             
              //Check if the row is empty
-            if(!empty($categoria) || !empty($largo) || !empty($ancho) || !empty( $profundidad) || !empty($peso) || !empty($idcat)){
+            if(!empty($categoria) || !empty($largo) || !empty($ancho) || !empty( $profundidad) || !empty($peso) || !empty($idcat) || !empty($tamaño)){
                     $row_is_empty = false;
             }
 
@@ -151,7 +158,7 @@ function modificar_productos() {
             }
 
             // Debug: Imprimir los valores que se están leyendo
-            $detalles_errores[] = "Fila " . $row . ": Categoria leída = '" . $categoria . "', Largo = '" . $largo . "', Ancho = '" . $ancho . "', Profundidad = '" . $profundidad . "', Peso = '" . $peso . "', ID Cat = '" . $idcat . "'";
+            $detalles_errores[] = "Fila " . $row . ": Categoria leída = '" . $categoria . "', Largo = '" . $largo . "', Ancho = '" . $ancho . "', Profundidad = '" . $profundidad . "', Peso = '" . $peso . "', ID Cat = '" . $idcat . "', Tamaño = '" . $tamaño . "'";
 
             // Verificar si $categoria es null antes de trim()
             if ($categoria === null) {
@@ -224,7 +231,9 @@ function modificar_productos() {
                 $actualizacion_parcial = false;
                 $log_producto = "Producto: " . $nombre_producto . " (ID: " . $product_id . ") - ";
                 
-                if ($peso || $largo || $ancho || $profundidad) {
+                $clase_modificada = false; // Variable para rastrear si la clase de envío fue modificada
+
+                if ($actualizar_tam && ($peso || $largo || $ancho || $profundidad)) {
                     $res_dimensiones = actualizar_dimensiones($product, $peso_actual, $largo_actual, $ancho_actual, $profundidad_actual, $peso, $largo, $ancho, $profundidad, $actualizar_si, $categoria, $nombre_producto, $product_id);
                 }
 
@@ -238,9 +247,25 @@ function modificar_productos() {
                     if ($res_dimensiones['detalles_errores']) {
                         $detalles_errores[] = $res_dimensiones['detalles_errores'];
                     }
-                    
                 } 
 
+                if ($actualizar_cat && $tamaño) {
+                    $res_clase_envio = actualizar_clase_envio($product, $tamaño, $actualizar_cat);
+                    if ($res_clase_envio['detalles_errores']) {
+                        $detalles_errores[] = $res_clase_envio['detalles_errores'];
+                    }
+                    if ($res_clase_envio['log_producto']) {
+                        $detalles_errores[] = $res_clase_envio['log_producto'];
+                    }
+                    if ($res_clase_envio['modificado']) {
+                        $clase_modificada = true; // Marcar que la clase fue modificada
+                    }
+                }
+
+                // **Contar cambios en modificados_totales**
+                if ($res_dimensiones['modificado'] || $clase_modificada) {
+                    $modificados_totales++;
+                }
             }
         }
     } catch (\Exception $e) {
@@ -314,5 +339,35 @@ function actualizar_dimensiones($product, $peso_actual, $largo_actual, $ancho_ac
         'actualizacion_total' => $actualizacion_total, 
         'log_producto' => $log_producto,
         'detalles_errores' => $detalles_errores
+    );
+}
+
+function actualizar_clase_envio($product, $tamaño, $actualizar_cat) {
+    $modificado = false;
+    $detalles_errores = '';
+    $log_producto = '';
+
+    // Obtener la clase de envío actual
+    $clase_actual = $product->get_shipping_class();
+
+    // Obtener la clase de envío por nombre o slug
+    $shipping_class = get_term_by('name', $tamaño, 'product_shipping_class') ?: get_term_by('slug', $tamaño, 'product_shipping_class');
+
+    if ($shipping_class && ($actualizar_cat || empty($clase_actual))) {
+        // Actualizar la clase de envío
+        $product->set_shipping_class_id($shipping_class->term_id);
+        $modificado = true;
+        $log_producto = "Clase de envío modificada para el producto " . $product->get_name() . " (ID: " . $product->get_id() . ") - Categoría: " . implode(', ', wp_get_post_terms($product->get_id(), 'product_cat', ['fields' => 'names'])) . "; Clase original: " . $clase_actual . "; Nueva clase: " . $shipping_class->name . ".";
+        
+        // Guardar el producto después de la modificación
+        $product->save();
+    } else {
+        $detalles_errores = "Clase de envío '$tamaño' no encontrada o no se requiere actualización.";
+    }
+
+    return array(
+        'modificado' => $modificado,
+        'detalles_errores' => $detalles_errores,
+        'log_producto' => $log_producto
     );
 }

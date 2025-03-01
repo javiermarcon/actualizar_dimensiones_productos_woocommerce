@@ -15,22 +15,22 @@ add_action('admin_menu', 'actualizar_dimensiones_menu');
 
 function actualizar_dimensiones_menu() {
     add_menu_page(
-        'Actualizar Dimensiones',
-        'Actualizar Dimensiones',
+        'Actualizar Productos',
+        'Actualizar Productos',
         'manage_options',
-        'actualizar-dimensiones',
-        'actualizar_dimensiones_pagina',
+        'actualizar-productos',
+        'actualizar_productos_pagina',
         'dashicons-database-import',
         75
     );
 }
 
-function actualizar_dimensiones_pagina() {
+function actualizar_productos_pagina() {
     echo '<div class="wrap">';
     echo '<h1>Importar Dimensiones</h1>';
 
-    if (isset($_POST['importar_dimensiones'])) {
-        $resultados = importar_dimensiones(); // Capturamos los resultados
+    if (isset($_POST['modificar_productos'])) {
+        $resultados = modificar_productos(); // Capturamos los resultados
         // Mostramos los resultados
         echo '<div id="resultado_importacion">';
         if ($resultados) {
@@ -61,14 +61,15 @@ function actualizar_dimensiones_pagina() {
     }
 
     echo '<form method="post" enctype="multipart/form-data">';
-    echo '<input type="file" name="archivo_excel" required>';
-    echo '<input type="submit" name="importar_dimensiones" value="Importar" class="button button-primary">';
+    echo '<input type="file" name="archivo_excel" required> <br />';
+    echo '<input type="checkbox" name="actualizar_si" value="1"> Actualizar siempre <br />';
+    echo '<input type="submit" name="modificar_productos" value="Importar" class="button button-primary">';
     echo '</form>';
 
     echo '</div>';
 }
 
-function importar_dimensiones() {
+function modificar_productos() {
     if (!current_user_can('manage_options')) {
         wp_die('No tienes permisos para realizar esta acción.');
     }
@@ -88,6 +89,8 @@ function importar_dimensiones() {
     $errores = 0;
     $detalles_errores = []; // Array para almacenar detalles de los errores
 	$productos_modificados = []; // Array para trackear que productos se modificaron.
+
+    $actualizar_si = isset($_POST['actualizar_si']); // Captura el estado del checkbox
 
     try {
         $spreadsheet = IOFactory::load($archivo);
@@ -125,17 +128,16 @@ function importar_dimensiones() {
 
             // Leer los valores de las celdas usando los índices de columna
             $categoria = ($columna_categoria !== false) ? trim((string)$hoja->getCell([$columna_categoria, $row])->getFormattedValue()) : null;
+            $idcat = ($columna_idcat !== false) ? intval($hoja->getCell([$columna_idcat, $row])->getFormattedValue()) : false;
             $largo = ($columna_largo !== false) ? floatval($hoja->getCell([$columna_largo, $row])->getFormattedValue()) : 0;
             $ancho = ($columna_ancho !== false) ? floatval($hoja->getCell([$columna_ancho, $row])->getFormattedValue()) : 0;
             $profundidad = ($columna_profundidad !== false) ? floatval($hoja->getCell([$columna_profundidad, $row])->getFormattedValue()) : 0;
             $peso = ($columna_peso !== false) ? floatval($hoja->getCell([$columna_peso, $row])->getFormattedValue()) : 0;
-            $idcat = ($columna_idcat !== false) ? intval($hoja->getCell([$columna_idcat, $row])->getFormattedValue()) : false;
-
+            
              //Check if the row is empty
             if(!empty($categoria) || !empty($largo) || !empty($ancho) || !empty( $profundidad) || !empty($peso) || !empty($idcat)){
                     $row_is_empty = false;
             }
-
 
             if ($row_is_empty) {
                 $empty_row_count++;
@@ -148,11 +150,8 @@ function importar_dimensiones() {
                 $empty_row_count = 0; // Resetear el contador si la fila no está vacía
             }
 
-
-
             // Debug: Imprimir los valores que se están leyendo
             $detalles_errores[] = "Fila " . $row . ": Categoria leída = '" . $categoria . "', Largo = '" . $largo . "', Ancho = '" . $ancho . "', Profundidad = '" . $profundidad . "', Peso = '" . $peso . "', ID Cat = '" . $idcat . "'";
-
 
             // Verificar si $categoria es null antes de trim()
             if ($categoria === null) {
@@ -224,55 +223,24 @@ function importar_dimensiones() {
                 $actualizacion_total = false;
                 $actualizacion_parcial = false;
                 $log_producto = "Producto: " . $nombre_producto . " (ID: " . $product_id . ") - ";
-                $modificado = false;
-
-                // Solo actualizar si algún valor no está seteado o si es cero
-                if (!$peso_actual || $peso_actual == 0 || (!$largo_actual || $largo_actual == 0) || (!$ancho_actual || $ancho_actual == 0) || (!$profundidad_actual || $profundidad_actual == 0)) {
-                    if ((!$peso_actual || $peso_actual == 0) && $peso > 0) {
-                        $product->set_weight($peso);
-                        $actualizacion_parcial = true;
-                        $log_producto .= "Peso actualizado de " . $peso_actual . " a " . $peso . "; ";
-                        $modificado = true;
-                    }
-                    if ((!$largo_actual || $largo_actual == 0)  && $largo > 0) {
-                        $product->set_length($largo);
-                        $actualizacion_parcial = true;
-                        $log_producto .= "Largo actualizado de " . $largo_actual . " a " . $largo . "; ";
-                         $modificado = true;
-                    }
-                    if ((!$ancho_actual || $ancho_actual == 0) && $ancho > 0) {
-                        $product->set_width($ancho);
-                        $actualizacion_parcial = true;
-                        $log_producto .= "Ancho actualizado de " . $ancho_actual . " a " . $ancho . "; ";
-                         $modificado = true;
-                    }
-                    if ((!$profundidad_actual || $profundidad_actual == 0) && $profundidad > 0) {
-                        $product->set_height($profundidad);
-                        $actualizacion_parcial = true;
-                        $log_producto .= "Profundidad actualizada de " . $profundidad_actual . " a " . $profundidad . "; ";
-                         $modificado = true;
-                    }
-
-                    if ((!$peso_actual || $peso_actual == 0) && (!$largo_actual || $largo_actual == 0) && (!$ancho_actual || $ancho_actual == 0) && (!$profundidad_actual || $profundidad_actual == 0)) {
-                        $actualizacion_total = true;
-                    }
-
-                    if($modificado){
-                        $product->save();
-
-                        if ($actualizacion_total) {
-                            $modificados_totales++;
-                        } else {
-                            $modificados_parciales++;
-                        }
-
-                         $productos_modificados[] = $log_producto;
-                    }
-
-
-                } else {
-                      $detalles_errores[] = "Fila " . $row . ": Producto " . $nombre_producto . " (ID: " . $product_id . ") no necesita actualización.";
+                
+                if ($peso || $largo || $ancho || $profundidad) {
+                    $res_dimensiones = actualizar_dimensiones($product, $peso_actual, $largo_actual, $ancho_actual, $profundidad_actual, $peso, $largo, $ancho, $profundidad, $actualizar_si, $categoria, $nombre_producto, $product_id);
                 }
+
+                if ($res_dimensiones && $res_dimensiones['modificado']) {
+                    if ($res_dimensiones['actualizacion_total']) {
+                        $modificados_totales++;
+                    } else {
+                        $modificados_parciales++;
+                    }
+                    $productos_modificados[] = $res_dimensiones['log_producto'];
+                    if ($res_dimensiones['detalles_errores']) {
+                        $detalles_errores[] = $res_dimensiones['detalles_errores'];
+                    }
+                    
+                } 
+
             }
         }
     } catch (\Exception $e) {
@@ -289,4 +257,62 @@ function importar_dimensiones() {
     );
 
     return $resultados;
+}
+
+function actualizar_dimensiones($product, $peso_actual, $largo_actual, $ancho_actual, $profundidad_actual, $peso, $largo, $ancho, $profundidad, $actualizar_si, $categoria, $nombre_producto, $product_id) {
+    $modificado = false;
+    $actualizacion_parcial = false;
+    $actualizacion_total = false;
+    $detalles_errores = '';
+    $log_producto = '';
+    $detalles_errores = '';
+    // Actualizar siempre si el checkbox está marcado
+    if ($actualizar_si || !$peso_actual || $peso_actual == 0 || (!$largo_actual || $largo_actual == 0) || (!$ancho_actual || $ancho_actual == 0) || (!$profundidad_actual || $profundidad_actual == 0)) {
+        
+        $log_producto .= "Actualizando el producto " . $nombre_producto . " (" . $product_id . ") de la categoria " . $categoria . "; ";
+
+        if (($actualizar_si || !$peso_actual || $peso_actual == 0) && $peso > 0) {
+            $product->set_weight($peso);
+            $actualizacion_parcial = true;
+            $log_producto .= "Peso actualizado de " . $peso_actual . " a " . $peso . "; ";
+            $modificado = true;
+        }
+        if (($actualizar_si || !$largo_actual || $largo_actual == 0)  && $largo > 0) {
+            $product->set_length($largo);
+            $actualizacion_parcial = true;
+            $log_producto .= "Largo actualizado de " . $largo_actual . " a " . $largo . "; ";
+                $modificado = true;
+        }
+        if (($actualizar_si || !$ancho_actual || $ancho_actual == 0) && $ancho > 0) {
+            $product->set_width($ancho);
+            $actualizacion_parcial = true;
+            $log_producto .= "Ancho actualizado de " . $ancho_actual . " a " . $ancho . "; ";
+                $modificado = true;
+        }
+        if (($actualizar_si || !$profundidad_actual || $profundidad_actual == 0) && $profundidad > 0) {
+            $product->set_height($profundidad);
+            $actualizacion_parcial = true;
+            $log_producto .= "Profundidad actualizada de " . $profundidad_actual . " a " . $profundidad . "; ";
+                $modificado = true;
+        }
+
+        if ($actualizar_si || (!$peso_actual || $peso_actual == 0) && (!$largo_actual || $largo_actual == 0) && (!$ancho_actual || $ancho_actual == 0) && (!$profundidad_actual || $profundidad_actual == 0)) {
+            $actualizacion_total = true;
+
+        }
+        
+        if($modificado){
+            $product->save();
+        }
+    } else {
+        $detalles_errores = "Fila " . $row . ": Producto " . $nombre_producto . " (ID: " . $product_id . ") no necesita actualización.";
+    }
+
+    return array(
+        'modificado' => $modificado, 
+        'actualizacion_parcial' => $actualizacion_parcial, 
+        'actualizacion_total' => $actualizacion_total, 
+        'log_producto' => $log_producto,
+        'detalles_errores' => $detalles_errores
+    );
 }

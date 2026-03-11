@@ -36,10 +36,11 @@ Plugin de WordPress para actualizar productos de WooCommerce desde Excel y para 
 
 Menú: `Actualizar Productos`
 
-Desde esa pantalla tenés dos bloques:
+El plugin ahora separa responsabilidades en 3 menús:
 
-1. **Importar Dimensiones** (Excel)
-2. **Árbol de categorías y metadata**
+1. **Importar Excel**
+2. **Árbol de categorías**
+3. **Configuración**
 
 ## Importación desde Excel
 
@@ -58,12 +59,14 @@ Nota: los encabezados se normalizan para tolerar mayúsculas/minúsculas y acent
 ### Formatos de Excel soportados
 
 1. **Dimensiones por categoría**
+
 - `Categoría` + una o más columnas de dimensiones/peso.
 
-2. **Solo tamaño por categoría**
+1. **Solo tamaño por categoría**
+
 - `Categoría` + `Tamaño`.
 
-### Checkboxes de importación
+### Checkboxes de configuración (guardados)
 
 - `Actualizar siempre`
   - Fuerza actualización de dimensiones incluso si el producto ya tiene datos.
@@ -72,6 +75,8 @@ Nota: los encabezados se normalizan para tolerar mayúsculas/minúsculas y acent
   - Si no hay columnas de dimensiones y sí hay `Tamaño`, usa fallback para actualizar tamaño.
 - `Actualizar tamaño (clase de envío) de los productos`
   - Actualiza explícitamente la clase de envío usando la columna `Tamaño`.
+
+Estos valores se guardan y se aplican automáticamente en cada importación.
 
 ## Árbol de categorías y metadata
 
@@ -110,4 +115,4 @@ Si marcás `Actualizar productos con esta metadata` al guardar:
 
 ## Autor
 
-- Tu Nombre
+- Javier Marcon

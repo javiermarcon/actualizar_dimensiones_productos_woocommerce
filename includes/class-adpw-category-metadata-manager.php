@@ -50,18 +50,28 @@ final class ADPW_Category_Metadata_Manager {
     }
 
     public static function save_category_metadata($term_id, $metadata, $valid_shipping_slugs) {
-        $shipping_slug = sanitize_title(wp_unslash((string) ($metadata['clase_envio'] ?? '')));
+        if (array_key_exists('clase_envio', $metadata)) {
+            $shipping_slug = sanitize_title(wp_unslash((string) $metadata['clase_envio']));
 
-        if ($shipping_slug === '') {
-            delete_term_meta($term_id, self::META_CLASS);
-        } elseif (in_array($shipping_slug, $valid_shipping_slugs, true)) {
-            update_term_meta($term_id, self::META_CLASS, $shipping_slug);
+            if ($shipping_slug === '') {
+                delete_term_meta($term_id, self::META_CLASS);
+            } elseif (in_array($shipping_slug, $valid_shipping_slugs, true)) {
+                update_term_meta($term_id, self::META_CLASS, $shipping_slug);
+            }
         }
 
-        self::save_numeric_meta($term_id, self::META_WEIGHT, self::normalize_number($metadata['peso'] ?? ''));
-        self::save_numeric_meta($term_id, self::META_HEIGHT, self::normalize_number($metadata['alto'] ?? ''));
-        self::save_numeric_meta($term_id, self::META_WIDTH, self::normalize_number($metadata['ancho'] ?? ''));
-        self::save_numeric_meta($term_id, self::META_DEPTH, self::normalize_number($metadata['profundidad'] ?? ''));
+        if (array_key_exists('peso', $metadata)) {
+            self::save_numeric_meta($term_id, self::META_WEIGHT, self::normalize_number($metadata['peso']));
+        }
+        if (array_key_exists('alto', $metadata)) {
+            self::save_numeric_meta($term_id, self::META_HEIGHT, self::normalize_number($metadata['alto']));
+        }
+        if (array_key_exists('ancho', $metadata)) {
+            self::save_numeric_meta($term_id, self::META_WIDTH, self::normalize_number($metadata['ancho']));
+        }
+        if (array_key_exists('profundidad', $metadata)) {
+            self::save_numeric_meta($term_id, self::META_DEPTH, self::normalize_number($metadata['profundidad']));
+        }
     }
 
     public static function update_products_using_most_specific_category($category_ids) {

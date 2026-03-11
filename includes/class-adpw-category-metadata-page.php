@@ -14,7 +14,13 @@ final class ADPW_Category_Metadata_Page {
         echo '<div class="wrap">';
         echo '<h1>Árbol de categorías</h1>';
 
-        if (isset($_POST['guardar_metadata_categorias'])) {
+        $is_save_request = (
+            isset($_SERVER['REQUEST_METHOD']) &&
+            strtoupper((string) $_SERVER['REQUEST_METHOD']) === 'POST' &&
+            isset($_POST[self::NONCE_FIELD])
+        );
+
+        if ($is_save_request) {
             $result = self::handle_save_request();
             if (!empty($result['error'])) {
                 echo '<div class="notice notice-error"><p>' . esc_html($result['error']) . '</p></div>';
@@ -54,8 +60,9 @@ final class ADPW_Category_Metadata_Page {
 
         echo '<p>Editá metadata por categoría: clase de envío, peso, alto, ancho y profundidad.</p>';
 
-        echo '<form method="post">';
+        echo '<form id="adpw-category-metadata-form" method="post" action="">';
         wp_nonce_field(self::NONCE_ACTION, self::NONCE_FIELD);
+        echo '<div id="adpw-metadata-delta-container"></div>';
 
         echo '<table class="widefat striped" style="max-width:1200px;">';
         echo '<thead><tr><th style="width:30%;">Categoría</th><th>Clase de envío</th><th>Peso</th><th>Alto</th><th>Ancho</th><th>Profundidad</th></tr></thead>';
@@ -73,9 +80,11 @@ final class ADPW_Category_Metadata_Page {
         echo '<p style="margin-top:12px;">';
         echo '<label><input type="checkbox" name="' . esc_attr(self::POST_FIELD_UPDATE_PRODUCTS) . '" value="1"> Actualizar productos con esta metadata</label>';
         echo '</p>';
+        echo '<noscript><p style="color:#b32d2e;">Para guardar cambios en el árbol es necesario tener JavaScript habilitado.</p></noscript>';
 
-        echo '<p><button type="submit" name="guardar_metadata_categorias" class="button button-primary">Guardar metadata</button></p>';
+        echo '<p><input type="submit" name="guardar_metadata_categorias" value="Guardar metadata" class="button button-primary"></p>';
         echo '</form>';
+        self::render_payload_script();
         echo '</div>';
     }
 
@@ -92,6 +101,9 @@ final class ADPW_Category_Metadata_Page {
         }
 
         $metadata_by_category = isset($_POST[self::POST_FIELD_METADATA]) ? (array) $_POST[self::POST_FIELD_METADATA] : [];
+        if (!empty($_POST['adpw_no_changes']) || empty($metadata_by_category)) {
+            return ['mensaje' => 'No hubo cambios para guardar.'];
+        }
         $should_update_products = !empty($_POST[self::POST_FIELD_UPDATE_PRODUCTS]);
         $valid_shipping_slugs = ADPW_Category_Metadata_Manager::get_valid_shipping_slugs();
 
@@ -141,7 +153,7 @@ final class ADPW_Category_Metadata_Page {
             }
             echo esc_html($category->name) . '</span></td>';
 
-            echo '<td><select name="' . esc_attr(self::POST_FIELD_METADATA) . '[' . esc_attr((string) $category_id) . '][clase_envio]">';
+            echo '<td><select class="adpw-meta-input" name="' . esc_attr(self::POST_FIELD_METADATA) . '[' . esc_attr((string) $category_id) . '][clase_envio]" data-category-id="' . esc_attr((string) $category_id) . '" data-field="clase_envio" data-original="' . esc_attr($meta['clase_envio']) . '">';
             echo '<option value="">Sin clase</option>';
             foreach ($shipping_classes as $shipping_class) {
                 $slug = (string) $shipping_class->slug;
@@ -160,6 +172,43 @@ final class ADPW_Category_Metadata_Page {
     }
 
     private static function render_number_cell($category_id, $field, $value) {
-        echo '<td><input type="number" step="0.01" min="0" name="' . esc_attr(self::POST_FIELD_METADATA) . '[' . esc_attr((string) $category_id) . '][' . esc_attr($field) . ']" value="' . esc_attr($value) . '" style="width:100%;"></td>';
+        echo '<td><input type="number" step="0.01" min="0" class="adpw-meta-input" name="' . esc_attr(self::POST_FIELD_METADATA) . '[' . esc_attr((string) $category_id) . '][' . esc_attr($field) . ']" data-category-id="' . esc_attr((string) $category_id) . '" data-field="' . esc_attr($field) . '" data-original="' . esc_attr($value) . '" value="' . esc_attr($value) . '" style="width:100%;"></td>';
+    }
+
+    private static function render_payload_script() {
+        echo '<script>';
+        echo '(function(){';
+        echo 'var form = document.getElementById(\"adpw-category-metadata-form\");';
+        echo 'if (!form) { return; }';
+        echo 'form.addEventListener(\"submit\", function(){';
+        echo 'var deltaContainer = document.getElementById(\"adpw-metadata-delta-container\");';
+        echo 'if (!deltaContainer) { return; }';
+        echo 'deltaContainer.innerHTML = \"\";';
+        echo 'var inputs = form.querySelectorAll(\".adpw-meta-input\");';
+        echo 'var changedCount = 0;';
+        echo 'for (var i = 0; i < inputs.length; i++) {';
+        echo 'var el = inputs[i];';
+        echo 'var original = el.getAttribute(\"data-original\") || \"\";';
+        echo 'var current = el.value || \"\";';
+        echo 'var name = el.getAttribute(\"name\");';
+        echo 'el.disabled = true;';
+        echo 'if (!name || current === original) { continue; }';
+        echo 'var hidden = document.createElement(\"input\");';
+        echo 'hidden.type = \"hidden\";';
+        echo 'hidden.name = name;';
+        echo 'hidden.value = current;';
+        echo 'deltaContainer.appendChild(hidden);';
+        echo 'changedCount++;';
+        echo '}';
+        echo 'if (changedCount === 0) {';
+        echo 'var marker = document.createElement(\"input\");';
+        echo 'marker.type = \"hidden\";';
+        echo 'marker.name = \"adpw_no_changes\";';
+        echo 'marker.value = \"1\";';
+        echo 'deltaContainer.appendChild(marker);';
+        echo '}';
+        echo '});';
+        echo '})();';
+        echo '</script>';
     }
 }

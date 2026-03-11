@@ -29,11 +29,34 @@ function actualizar_productos_pagina() {
     echo '<div class="wrap">';
     echo '<h1>Importar Dimensiones</h1>';
 
+    if (isset($_POST['guardar_metadata_categorias'])) {
+        $resultado_guardado_metadata = ADPW_Category_Metadata_Manager::handle_save_request();
+
+        if (!empty($resultado_guardado_metadata['error'])) {
+            echo '<div class="notice notice-error"><p>' . esc_html($resultado_guardado_metadata['error']) . '</p></div>';
+        } else {
+            echo '<div class="notice notice-success"><p>' . esc_html($resultado_guardado_metadata['mensaje']) . '</p></div>';
+            if (!empty($resultado_guardado_metadata['detalle_productos'])) {
+                echo '<p>' . esc_html($resultado_guardado_metadata['detalle_productos']) . '</p>';
+            }
+            echo '</div>';
+        }
+    }
+
     if (isset($_POST['modificar_productos'])) {
         $resultados = modificar_productos(); // Capturamos los resultados
         // Mostramos los resultados
         echo '<div id="resultado_importacion">';
-        if ($resultados) {
+        if (!empty($resultados['error_general'])) {
+            echo '<div class="notice notice-error"><p>' . esc_html($resultados['error_general']) . '</p></div>';
+            if (!empty($resultados['detalles'])) {
+                echo '<ul>';
+                foreach ($resultados['detalles'] as $detalle) {
+                    echo '<li>' . esc_html($detalle) . '</li>';
+                }
+                echo '</ul>';
+            }
+        } elseif ($resultados) {
             echo '<p><strong>Resultados de la importación:</strong></p>';
             echo "<ul>";
             echo "<li>Actualizaciones Totales: " . esc_html($resultados['totales']) . "</li>";
@@ -63,21 +86,390 @@ function actualizar_productos_pagina() {
     echo '<form method="post" enctype="multipart/form-data">';
     echo '<input type="file" name="archivo_excel" required> <br />';
     echo '<input type="checkbox" name="actualizar_si" value="1"> Actualizar siempre <br />';
-    echo '<input type="checkbox" name="actualizar_tam" value="1"> Actualizar tamaño de los productos <br />';
-    echo '<input type="checkbox" name="actualizar_cat" value="1"> Actualizar tipo de envio de los productos <br />';
+    echo '<input type="checkbox" name="actualizar_tam" value="1"> Actualizar dimensiones (peso/largo/ancho/profundidad) o tamaño si el Excel solo trae Categoría + tamaño <br />';
+    echo '<input type="checkbox" name="actualizar_cat" value="1"> Actualizar tamaño (clase de envío) de los productos <br />';
     echo '<input type="submit" name="modificar_productos" value="Importar" class="button button-primary">';
     echo '</form>';
+
+    ADPW_Category_Metadata_Manager::render_tree();
 
     echo '</div>';
 }
 
+final class ADPW_Category_Metadata_Manager {
+    private const NONCE_ACTION = 'guardar_metadata_por_categoria_action';
+    private const NONCE_FIELD = 'guardar_metadata_por_categoria_nonce';
+    private const POST_FIELD_METADATA = 'metadata_categoria';
+    private const POST_FIELD_UPDATE_PRODUCTS = 'actualizar_productos_desde_categorias';
+
+    private const META_CLASS = '_adpw_categoria_clase_envio';
+    private const META_WEIGHT = '_adpw_categoria_peso';
+    private const META_HEIGHT = '_adpw_categoria_alto';
+    private const META_WIDTH = '_adpw_categoria_ancho';
+    private const META_DEPTH = '_adpw_categoria_profundidad';
+
+    public static function handle_save_request() {
+        if (!current_user_can('manage_options')) {
+            return [
+                'error' => 'No tenés permisos para guardar metadata por categoría.',
+            ];
+        }
+
+        if (
+            !isset($_POST[self::NONCE_FIELD]) ||
+            !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST[self::NONCE_FIELD])), self::NONCE_ACTION)
+        ) {
+            return [
+                'error' => 'No se pudo validar la solicitud. Recargá la página e intentá nuevamente.',
+            ];
+        }
+
+        $metadata_by_category = isset($_POST[self::POST_FIELD_METADATA]) ? (array) $_POST[self::POST_FIELD_METADATA] : [];
+        $should_update_products = !empty($_POST[self::POST_FIELD_UPDATE_PRODUCTS]);
+        $valid_shipping_slugs = self::get_valid_shipping_slugs();
+
+        if ($valid_shipping_slugs === null) {
+            return [
+                'error' => 'No se pudieron validar las clases de envío disponibles.',
+            ];
+        }
+
+        $saved_count = 0;
+        $category_ids = [];
+
+        foreach ($metadata_by_category as $category_id => $metadata) {
+            $term_id = absint($category_id);
+            if (!$term_id) {
+                continue;
+            }
+
+            self::save_category_metadata($term_id, (array) $metadata, $valid_shipping_slugs);
+            $saved_count++;
+            $category_ids[] = $term_id;
+        }
+
+        $result = [
+            'mensaje' => sprintf('Se actualizaron %d categorías.', $saved_count),
+        ];
+
+        if ($should_update_products && !empty($category_ids)) {
+            $updated_products = self::update_products_using_most_specific_category($category_ids);
+            $result['detalle_productos'] = sprintf('Productos actualizados desde metadata: %d.', $updated_products);
+        }
+
+        return $result;
+    }
+
+    public static function render_tree() {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        $categories = get_terms([
+            'taxonomy' => 'product_cat',
+            'hide_empty' => false,
+        ]);
+        if (is_wp_error($categories)) {
+            echo '<div class="notice notice-error"><p>No se pudieron cargar las categorías de producto.</p></div>';
+            return;
+        }
+
+        $shipping_classes = get_terms([
+            'taxonomy' => 'product_shipping_class',
+            'hide_empty' => false,
+        ]);
+        if (is_wp_error($shipping_classes)) {
+            echo '<div class="notice notice-error"><p>No se pudieron cargar las clases de envío.</p></div>';
+            return;
+        }
+
+        $categories_by_parent = [];
+        foreach ($categories as $category) {
+            $parent_id = (int) $category->parent;
+            if (!isset($categories_by_parent[$parent_id])) {
+                $categories_by_parent[$parent_id] = [];
+            }
+            $categories_by_parent[$parent_id][] = $category;
+        }
+
+        echo '<hr style="margin:24px 0;">';
+        echo '<h2>Árbol de categorías y metadata</h2>';
+        echo '<p>Editá por categoría: clase de envío, peso, alto, ancho y profundidad.</p>';
+
+        echo '<form method="post">';
+        wp_nonce_field(self::NONCE_ACTION, self::NONCE_FIELD);
+
+        echo '<table class="widefat striped" style="max-width:1200px;">';
+        echo '<thead><tr><th style="width:30%;">Categoría</th><th>Clase de envío</th><th>Peso</th><th>Alto</th><th>Ancho</th><th>Profundidad</th></tr></thead>';
+        echo '<tbody>';
+
+        if (empty($categories_by_parent[0])) {
+            echo '<tr><td colspan="6">No hay categorías de producto para mostrar.</td></tr>';
+        } else {
+            self::render_category_rows(0, $categories_by_parent, $shipping_classes, 0);
+        }
+
+        echo '</tbody>';
+        echo '</table>';
+
+        echo '<p style="margin-top:12px;">';
+        echo '<label><input type="checkbox" name="' . esc_attr(self::POST_FIELD_UPDATE_PRODUCTS) . '" value="1"> Actualizar productos con esta metadata</label>';
+        echo '</p>';
+
+        echo '<p style="margin-top:12px;">';
+        echo '<button type="submit" name="guardar_metadata_categorias" class="button button-primary">Guardar metadata por categoría</button>';
+        echo '</p>';
+        echo '</form>';
+    }
+
+    private static function render_category_rows($parent_id, $categories_by_parent, $shipping_classes, $level) {
+        if (empty($categories_by_parent[$parent_id])) {
+            return;
+        }
+
+        foreach ($categories_by_parent[$parent_id] as $category) {
+            $category_id = (int) $category->term_id;
+            $meta = self::get_category_meta_values($category_id);
+
+            echo '<tr>';
+            echo '<td>';
+            echo '<span style="display:inline-block;padding-left:' . esc_attr((string) ($level * 20)) . 'px;">';
+            if ($level > 0) {
+                echo esc_html(str_repeat('└ ', min(1, $level)));
+            }
+            echo esc_html($category->name);
+            echo '</span>';
+            echo '</td>';
+
+            echo '<td>';
+            echo '<select name="' . esc_attr(self::POST_FIELD_METADATA) . '[' . esc_attr((string) $category_id) . '][clase_envio]">';
+            echo '<option value="">Sin clase</option>';
+            foreach ($shipping_classes as $shipping_class) {
+                $slug = (string) $shipping_class->slug;
+                echo '<option value="' . esc_attr($slug) . '" ' . selected($meta['clase_envio'], $slug, false) . '>' . esc_html($shipping_class->name) . '</option>';
+            }
+            echo '</select>';
+            echo '</td>';
+
+            self::render_number_cell($category_id, 'peso', $meta['peso']);
+            self::render_number_cell($category_id, 'alto', $meta['alto']);
+            self::render_number_cell($category_id, 'ancho', $meta['ancho']);
+            self::render_number_cell($category_id, 'profundidad', $meta['profundidad']);
+            echo '</tr>';
+
+            self::render_category_rows($category_id, $categories_by_parent, $shipping_classes, $level + 1);
+        }
+    }
+
+    private static function render_number_cell($category_id, $field, $value) {
+        echo '<td><input type="number" step="0.01" min="0" name="' . esc_attr(self::POST_FIELD_METADATA) . '[' . esc_attr((string) $category_id) . '][' . esc_attr($field) . ']" value="' . esc_attr($value) . '" style="width:100%;"></td>';
+    }
+
+    private static function get_category_meta_values($category_id) {
+        return [
+            'clase_envio' => (string) get_term_meta($category_id, self::META_CLASS, true),
+            'peso' => (string) get_term_meta($category_id, self::META_WEIGHT, true),
+            'alto' => (string) get_term_meta($category_id, self::META_HEIGHT, true),
+            'ancho' => (string) get_term_meta($category_id, self::META_WIDTH, true),
+            'profundidad' => (string) get_term_meta($category_id, self::META_DEPTH, true),
+        ];
+    }
+
+    private static function get_valid_shipping_slugs() {
+        $terms = get_terms([
+            'taxonomy' => 'product_shipping_class',
+            'hide_empty' => false,
+            'fields' => 'slugs',
+        ]);
+        if (is_wp_error($terms)) {
+            return null;
+        }
+
+        return array_map('strval', $terms);
+    }
+
+    private static function save_category_metadata($term_id, $metadata, $valid_shipping_slugs) {
+        $shipping_slug = sanitize_title(wp_unslash((string) ($metadata['clase_envio'] ?? '')));
+
+        if ($shipping_slug === '') {
+            delete_term_meta($term_id, self::META_CLASS);
+        } elseif (in_array($shipping_slug, $valid_shipping_slugs, true)) {
+            update_term_meta($term_id, self::META_CLASS, $shipping_slug);
+        }
+
+        self::save_numeric_meta($term_id, self::META_WEIGHT, self::normalize_number($metadata['peso'] ?? ''));
+        self::save_numeric_meta($term_id, self::META_HEIGHT, self::normalize_number($metadata['alto'] ?? ''));
+        self::save_numeric_meta($term_id, self::META_WIDTH, self::normalize_number($metadata['ancho'] ?? ''));
+        self::save_numeric_meta($term_id, self::META_DEPTH, self::normalize_number($metadata['profundidad'] ?? ''));
+    }
+
+    private static function normalize_number($value) {
+        $text = trim(wp_unslash((string) $value));
+        if ($text === '') {
+            return '';
+        }
+
+        $text = str_replace(',', '.', $text);
+        if (!is_numeric($text)) {
+            return '';
+        }
+
+        return (string) max(0, (float) $text);
+    }
+
+    private static function save_numeric_meta($term_id, $meta_key, $value) {
+        if ($value === '') {
+            delete_term_meta($term_id, $meta_key);
+            return;
+        }
+
+        update_term_meta($term_id, $meta_key, $value);
+    }
+
+    private static function update_products_using_most_specific_category($category_ids) {
+        $category_ids = array_values(array_unique(array_map('absint', $category_ids)));
+        if (empty($category_ids)) {
+            return 0;
+        }
+
+        $product_ids = get_posts([
+            'post_type' => 'product',
+            'posts_per_page' => -1,
+            'fields' => 'ids',
+            'tax_query' => [[
+                'taxonomy' => 'product_cat',
+                'field' => 'term_id',
+                'terms' => $category_ids,
+                'include_children' => false,
+            ]],
+        ]);
+
+        $category_depth_cache = [];
+        $shipping_class_cache = [];
+        $updated_products = 0;
+
+        foreach ($product_ids as $product_id) {
+            $product = wc_get_product($product_id);
+            if (!$product) {
+                continue;
+            }
+
+            $product_term_ids = wp_get_post_terms($product_id, 'product_cat', ['fields' => 'ids']);
+            if (is_wp_error($product_term_ids) || empty($product_term_ids)) {
+                continue;
+            }
+
+            $candidate_ids = array_values(array_intersect($category_ids, array_map('intval', $product_term_ids)));
+            if (empty($candidate_ids)) {
+                continue;
+            }
+
+            $selected_category_id = self::pick_deepest_category($candidate_ids, $category_depth_cache);
+            if (!$selected_category_id) {
+                continue;
+            }
+
+            if (self::apply_category_metadata_to_product($product, $selected_category_id, $shipping_class_cache)) {
+                $updated_products++;
+            }
+        }
+
+        return $updated_products;
+    }
+
+    private static function pick_deepest_category($category_ids, &$depth_cache) {
+        $selected_id = 0;
+        $max_depth = -1;
+
+        foreach ($category_ids as $category_id) {
+            if (!isset($depth_cache[$category_id])) {
+                $depth_cache[$category_id] = count(get_ancestors($category_id, 'product_cat', 'taxonomy'));
+            }
+
+            if ($depth_cache[$category_id] > $max_depth) {
+                $max_depth = $depth_cache[$category_id];
+                $selected_id = (int) $category_id;
+            }
+        }
+
+        return $selected_id;
+    }
+
+    private static function apply_category_metadata_to_product($product, $category_id, &$shipping_class_cache) {
+        $meta = self::get_category_meta_values($category_id);
+        $has_changes = false;
+
+        $new_shipping_class_id = self::resolve_shipping_class_id($meta['clase_envio'], $shipping_class_cache);
+        if ((int) $product->get_shipping_class_id() !== $new_shipping_class_id) {
+            $product->set_shipping_class_id($new_shipping_class_id);
+            $has_changes = true;
+        }
+
+        $has_changes = self::set_product_numeric_if_needed($product, 'weight', $meta['peso']) || $has_changes;
+        $has_changes = self::set_product_numeric_if_needed($product, 'height', $meta['alto']) || $has_changes;
+        $has_changes = self::set_product_numeric_if_needed($product, 'width', $meta['ancho']) || $has_changes;
+        $has_changes = self::set_product_numeric_if_needed($product, 'length', $meta['profundidad']) || $has_changes;
+
+        if ($has_changes) {
+            $product->save();
+        }
+
+        return $has_changes;
+    }
+
+    private static function set_product_numeric_if_needed($product, $field, $new_value) {
+        if ($new_value === '') {
+            return false;
+        }
+
+        $getter = 'get_' . $field;
+        $setter = 'set_' . $field;
+        $current_value = (string) $product->{$getter}();
+        $new_value = (string) $new_value;
+
+        if ($current_value === $new_value) {
+            return false;
+        }
+
+        $product->{$setter}($new_value);
+        return true;
+    }
+
+    private static function resolve_shipping_class_id($shipping_slug, &$shipping_class_cache) {
+        if ($shipping_slug === '') {
+            return 0;
+        }
+
+        if (!array_key_exists($shipping_slug, $shipping_class_cache)) {
+            $shipping_class = get_term_by('slug', $shipping_slug, 'product_shipping_class');
+            $shipping_class_cache[$shipping_slug] = ($shipping_class && !is_wp_error($shipping_class))
+                ? (int) $shipping_class->term_id
+                : 0;
+        }
+
+        return $shipping_class_cache[$shipping_slug];
+    }
+}
+
+function adpw_normalizar_encabezado($valor) {
+    $texto = trim((string) $valor);
+    $texto = str_replace("\xc2\xa0", ' ', $texto);
+    $texto = strtolower(remove_accents($texto));
+    $texto = preg_replace('/\s+/', ' ', $texto);
+    return trim((string) $texto);
+}
+
 function modificar_productos() {
     if (!current_user_can('manage_options')) {
-        wp_die('No tienes permisos para realizar esta acción.');
+        return [
+            'error_general' => 'No tienes permisos para realizar esta acción.',
+        ];
     }
 
     if (empty($_FILES['archivo_excel']['tmp_name'])) {
-        wp_die('No se seleccionó ningún archivo.');
+        return [
+            'error_general' => 'No se seleccionó ningún archivo.',
+        ];
     }
 
     $archivo = $_FILES['archivo_excel']['tmp_name'];
@@ -110,18 +502,42 @@ function modificar_productos() {
             $encabezados[$col] = trim($cell->getFormattedValue());
         }
 
-        $encabezados = array_map('strtolower', $encabezados); // Convertir todos los encabezados a minúsculas
-        $columna_categoria = array_search('categoría', $encabezados);
+        $encabezados = array_map('adpw_normalizar_encabezado', $encabezados); // Normalizar acentos/espacios para mejorar match
+        $columna_categoria = array_search('categoria', $encabezados);
         $columna_largo = array_search('largo (cm)', $encabezados);
         $columna_ancho = array_search('ancho (cm)', $encabezados);
         $columna_profundidad = array_search('profundidad (cm)', $encabezados);
         $columna_peso = array_search('peso (kg)', $encabezados);
-        $columna_idcat = array_search('id categoría', $encabezados);
-        $columna_tamaño = array_search('tamaño', $encabezados);
-        echo $columna_categoria . " " . $columna_tamaño;
-       // Si no se encuentran los encabezados, mostrar un error y salir
-        if ($columna_categoria === false || (($columna_largo === false && $columna_ancho === false && $columna_profundidad === false && $columna_peso === false) || $columna_tamaño === false)) {
-            wp_die('No se encontraron los encabezados esperados en el archivo Excel.  Asegúrate de que las columnas tengan los nombres correctos: Categoría, Largo (cm), Ancho (cm), Profundidad (cm), Peso (kg), Tamaño.');
+        $columna_idcat = array_search('id categoria', $encabezados);
+        $columna_tamaño = array_search('tamano', $encabezados);
+
+        $faltan_columnas_dimensiones = ($columna_largo === false && $columna_ancho === false && $columna_profundidad === false && $columna_peso === false);
+        $encabezados_requeridos = ['Categoría'];
+
+        $solo_tamano_desde_excel = $actualizar_tam && $faltan_columnas_dimensiones && $columna_tamaño !== false;
+        $actualizar_tam_dimensiones = $actualizar_tam && !$faltan_columnas_dimensiones;
+
+        if ($actualizar_tam_dimensiones) {
+            $encabezados_requeridos[] = 'Largo (cm) o Ancho (cm) o Profundidad (cm) o Peso (kg)';
+        } elseif ($actualizar_tam && $columna_tamaño === false) {
+            $encabezados_requeridos[] = 'Tamaño (cuando se usa importación solo Categoría + tamaño)';
+        }
+        if ($actualizar_cat) {
+            $encabezados_requeridos[] = 'Tamaño';
+        }
+
+        if (
+            $columna_categoria === false ||
+            ($actualizar_tam && $faltan_columnas_dimensiones && $columna_tamaño === false) ||
+            ($actualizar_cat && $columna_tamaño === false)
+        ) {
+            return [
+                'error_general' => 'No se encontraron los encabezados esperados en el archivo Excel.',
+                'detalles' => [
+                    'Incluí al menos: ' . implode(', ', $encabezados_requeridos) . '.',
+                    'Si el archivo es solo Categoría + tamaño, marcá "Actualizar tamaño (clase de envío)" o dejá marcada "Actualizar dimensiones..." para fallback automático.',
+                ],
+            ];
         }
 
 
@@ -230,10 +646,16 @@ function modificar_productos() {
                 $actualizacion_total = false;
                 $actualizacion_parcial = false;
                 $log_producto = "Producto: " . $nombre_producto . " (ID: " . $product_id . ") - ";
+                $res_dimensiones = [
+                    'modificado' => false,
+                    'actualizacion_total' => false,
+                    'log_producto' => '',
+                    'detalles_errores' => '',
+                ];
                 
                 $clase_modificada = false; // Variable para rastrear si la clase de envío fue modificada
 
-                if ($actualizar_tam && ($peso || $largo || $ancho || $profundidad)) {
+                if ($actualizar_tam_dimensiones && ($peso || $largo || $ancho || $profundidad)) {
                     $res_dimensiones = actualizar_dimensiones($product, $peso_actual, $largo_actual, $ancho_actual, $profundidad_actual, $peso, $largo, $ancho, $profundidad, $actualizar_si, $categoria, $nombre_producto, $product_id);
                 }
 
@@ -249,7 +671,7 @@ function modificar_productos() {
                     }
                 } 
 
-                if ($actualizar_cat && $tamaño) {
+                if (($actualizar_cat || $solo_tamano_desde_excel) && $tamaño) {
                     $res_clase_envio = actualizar_clase_envio($product, $tamaño, $actualizar_cat);
                     if ($res_clase_envio['detalles_errores']) {
                         $detalles_errores[] = $res_clase_envio['detalles_errores'];
@@ -269,8 +691,9 @@ function modificar_productos() {
             }
         }
     } catch (\Exception $e) {
-        wp_die('Error al leer el archivo Excel: ' . $e->getMessage());
-        return false; // Importante: retornar false en caso de error
+        return [
+            'error_general' => 'Error al leer el archivo Excel: ' . $e->getMessage(),
+        ];
     }
 
    $resultados = array(

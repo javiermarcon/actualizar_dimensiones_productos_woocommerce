@@ -154,7 +154,7 @@ final class ADPW_Excel_Import_Service {
         $processed_in_batch = 0;
 
         $category_map = self::load_json_file((string) $job['categories_data_file']);
-        $name_to_id_cache = [];
+        $name_to_ids_cache = [];
         $id_to_id_cache = [];
 
         while ($row <= $highest_row && $processed_in_batch < $batch_size) {
@@ -172,39 +172,45 @@ final class ADPW_Excel_Import_Service {
             }
 
             $job['empty_row_count'] = 0;
-            $term_id = self::resolve_category_id_for_parse($entry['categoria'], (int) $entry['idcat'], $entry['row'], $job['results']['detalles'], $name_to_id_cache, $id_to_id_cache);
-            if (!$term_id) {
+            $term_ids = self::resolve_category_ids_for_parse($entry['categoria'], (int) $entry['idcat'], $entry['row'], $job['results']['detalles'], $name_to_ids_cache, $id_to_id_cache);
+            if (empty($term_ids)) {
                 $job['results']['errores']++;
                 continue;
             }
 
-            $key = (string) $term_id;
-            if (!isset($category_map[$key])) {
-                $category_map[$key] = [
-                    'categoria_id' => $term_id,
-                    'categoria' => (string) $entry['categoria'],
-                    'tamano' => '',
-                    'peso' => 0,
-                    'largo' => 0,
-                    'ancho' => 0,
-                    'profundidad' => 0,
-                ];
+            if (count($term_ids) > 1 && (string) $entry['categoria'] !== '') {
+                self::append_limited($job['results']['detalles'], "Fila {$entry['row']}: la categoría '{$entry['categoria']}' coincide con " . count($term_ids) . ' categorías. Se actualizarán todas.');
             }
 
-            if ((string) $entry['tamano'] !== '') {
-                $category_map[$key]['tamano'] = (string) $entry['tamano'];
-            }
-            if ((float) $entry['peso'] > 0) {
-                $category_map[$key]['peso'] = (float) $entry['peso'];
-            }
-            if ((float) $entry['largo'] > 0) {
-                $category_map[$key]['largo'] = (float) $entry['largo'];
-            }
-            if ((float) $entry['ancho'] > 0) {
-                $category_map[$key]['ancho'] = (float) $entry['ancho'];
-            }
-            if ((float) $entry['profundidad'] > 0) {
-                $category_map[$key]['profundidad'] = (float) $entry['profundidad'];
+            foreach ($term_ids as $term_id) {
+                $key = (string) $term_id;
+                if (!isset($category_map[$key])) {
+                    $category_map[$key] = [
+                        'categoria_id' => $term_id,
+                        'categoria' => (string) $entry['categoria'],
+                        'tamano' => '',
+                        'peso' => 0,
+                        'largo' => 0,
+                        'ancho' => 0,
+                        'profundidad' => 0,
+                    ];
+                }
+
+                if ((string) $entry['tamano'] !== '') {
+                    $category_map[$key]['tamano'] = (string) $entry['tamano'];
+                }
+                if ((float) $entry['peso'] > 0) {
+                    $category_map[$key]['peso'] = (float) $entry['peso'];
+                }
+                if ((float) $entry['largo'] > 0) {
+                    $category_map[$key]['largo'] = (float) $entry['largo'];
+                }
+                if ((float) $entry['ancho'] > 0) {
+                    $category_map[$key]['ancho'] = (float) $entry['ancho'];
+                }
+                if ((float) $entry['profundidad'] > 0) {
+                    $category_map[$key]['profundidad'] = (float) $entry['profundidad'];
+                }
             }
         }
 
@@ -439,36 +445,54 @@ final class ADPW_Excel_Import_Service {
         }
     }
 
-    private static function resolve_category_id_for_parse($categoria, $idcat, $row, &$detalles_errores, &$name_to_id_cache, &$id_to_id_cache) {
+    private static function resolve_category_ids_for_parse($categoria, $idcat, $row, &$detalles_errores, &$name_to_ids_cache, &$id_to_id_cache) {
         $categoria = trim((string) $categoria);
         $idcat = (int) $idcat;
+        $matched_ids = [];
 
         if ($categoria !== '') {
             $key = strtolower(remove_accents($categoria));
-            if (isset($name_to_id_cache[$key])) {
-                return (int) $name_to_id_cache[$key];
-            }
+            if (isset($name_to_ids_cache[$key])) {
+                $matched_ids = $name_to_ids_cache[$key];
+            } else {
+                $terms = get_terms([
+                    'taxonomy' => 'product_cat',
+                    'hide_empty' => false,
+                    'name' => $categoria,
+                ]);
 
-            $term = get_term_by('name', $categoria, 'product_cat');
-            if ($term && !is_wp_error($term)) {
-                $name_to_id_cache[$key] = (int) $term->term_id;
-                return (int) $term->term_id;
+                if (!is_wp_error($terms) && !empty($terms)) {
+                    foreach ($terms as $term) {
+                        if (!isset($term->term_id)) {
+                            continue;
+                        }
+                        $matched_ids[] = (int) $term->term_id;
+                    }
+                }
+
+                $name_to_ids_cache[$key] = array_values(array_unique(array_filter($matched_ids)));
             }
         }
 
         if ($idcat > 0) {
             if (isset($id_to_id_cache[$idcat])) {
-                return (int) $id_to_id_cache[$idcat];
-            }
-            $term = get_term($idcat, 'product_cat');
-            if ($term && !is_wp_error($term)) {
-                $id_to_id_cache[$idcat] = (int) $term->term_id;
-                return (int) $term->term_id;
+                $matched_ids[] = (int) $id_to_id_cache[$idcat];
+            } else {
+                $term = get_term($idcat, 'product_cat');
+                if ($term && !is_wp_error($term)) {
+                    $id_to_id_cache[$idcat] = (int) $term->term_id;
+                    $matched_ids[] = (int) $term->term_id;
+                }
             }
         }
 
+        $matched_ids = array_values(array_unique(array_filter(array_map('intval', $matched_ids))));
+        if (!empty($matched_ids)) {
+            return $matched_ids;
+        }
+
         self::append_limited($detalles_errores, "Fila {$row}: No se encontró la categoría '{$categoria}'.");
-        return 0;
+        return [];
     }
 
     private static function cleanup_job_files($job) {

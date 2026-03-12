@@ -58,6 +58,8 @@ La importación se ejecuta en segundo plano por lotes usando `wp-cron` y muestra
 
 Nota: los encabezados se normalizan para tolerar mayúsculas/minúsculas y acentos (`Categoría`/`Categoria`, `Tamaño`/`Tamano`).
 
+Si una fila trae una `Categoría` cuyo nombre existe en varias ramas del árbol, la importación aplica esa fila a todas las categorías coincidentes y luego actualiza los productos de todas esas categorías.
+
 ### Formatos de Excel soportados
 
 1. **Dimensiones por categoría**

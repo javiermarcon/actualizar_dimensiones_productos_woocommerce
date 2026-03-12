@@ -42,6 +42,8 @@ El plugin ahora separa responsabilidades en 3 menús:
 2. **Árbol de categorías**
 3. **Configuración**
 
+La importación se ejecuta en segundo plano por lotes usando `wp-cron` y muestra barra de progreso en la pantalla de importación.
+
 ## Importación desde Excel
 
 ### Encabezados reconocidos
@@ -77,6 +79,11 @@ Nota: los encabezados se normalizan para tolerar mayúsculas/minúsculas y acent
   - Actualiza explícitamente la clase de envío usando la columna `Tamaño`.
 
 Estos valores se guardan y se aplican automáticamente en cada importación.
+
+- `Tamaño de lote`
+  - Define cuántos elementos procesa cada ejecución de cron.
+  - En los pasos 1 y 2 el lote aplica sobre filas/categorías; en el paso 3 aplica sobre productos.
+  - Ayuda a evitar `max_execution_time` en importaciones grandes.
 
 ## Árbol de categorías y metadata
 

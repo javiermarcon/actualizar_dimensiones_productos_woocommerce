@@ -14,6 +14,7 @@ final class ADPW_Settings {
             'actualizar_si' => 0,
             'actualizar_tam' => 0,
             'actualizar_cat' => 0,
+            'categorias_por_lote' => 20,
         ];
 
         $saved = get_option(self::OPTION_KEY, []);
@@ -40,6 +41,7 @@ final class ADPW_Settings {
             'actualizar_si' => !empty($_POST['actualizar_si']) ? 1 : 0,
             'actualizar_tam' => !empty($_POST['actualizar_tam']) ? 1 : 0,
             'actualizar_cat' => !empty($_POST['actualizar_cat']) ? 1 : 0,
+            'categorias_por_lote' => max(1, absint($_POST['categorias_por_lote'] ?? 20)),
         ];
 
         update_option(self::OPTION_KEY, $settings);
@@ -69,6 +71,7 @@ final class ADPW_Settings {
         echo '<tr><th scope="row">Actualizar siempre</th><td><label><input type="checkbox" name="actualizar_si" value="1" ' . checked(1, (int) $settings['actualizar_si'], false) . '> Forzar actualización de dimensiones.</label></td></tr>';
         echo '<tr><th scope="row">Actualizar dimensiones</th><td><label><input type="checkbox" name="actualizar_tam" value="1" ' . checked(1, (int) $settings['actualizar_tam'], false) . '> Usa columnas: peso/largo/ancho/profundidad. Si solo existe tamaño, usa fallback.</label></td></tr>';
         echo '<tr><th scope="row">Actualizar tamaño</th><td><label><input type="checkbox" name="actualizar_cat" value="1" ' . checked(1, (int) $settings['actualizar_cat'], false) . '> Actualiza clase de envío usando columna tamaño.</label></td></tr>';
+        echo '<tr><th scope="row">Tamaño de lote</th><td><input type="number" min="1" step="1" name="categorias_por_lote" value="' . esc_attr((string) $settings['categorias_por_lote']) . '"> <p class="description">Cantidad máxima de elementos por ejecución de cron. En el paso 3 se aplica sobre productos, no sobre categorías.</p></td></tr>';
         echo '</table>';
 
         echo '<p><button type="submit" name="adpw_save_settings" class="button button-primary">Guardar configuración</button></p>';

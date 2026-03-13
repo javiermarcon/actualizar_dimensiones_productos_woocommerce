@@ -104,6 +104,7 @@ Estos valores se guardan y se aplican automáticamente en cada importación.
 
 - `Actualizar productos al guardar metadata`
   - Si está activa, al guardar cambios en el árbol también se actualizan los productos afectados.
+  - Esa actualización corre en segundo plano por lotes usando `wp-cron`.
   - Si un producto pertenece a múltiples categorías editadas, aplica la metadata de la categoría **más específica**.
 
 ## Árbol de categorías y metadata
@@ -128,7 +129,7 @@ Al guardar, los valores se almacenan en `term_meta` con estas keys:
 
 Si en `Configuración > Árbol de categorías` está activa la opción `Actualizar productos al guardar metadata`:
 
-- El plugin actualiza productos asociados a esas categorías.
+- El plugin encola la actualización y procesa productos asociados a esas categorías por lotes usando `wp-cron`.
 - Si un producto pertenece a múltiples categorías editadas, aplica la metadata de la categoría **más específica** (más profunda en el árbol).
 
 ## Errores y validaciones

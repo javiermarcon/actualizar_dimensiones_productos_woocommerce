@@ -221,54 +221,22 @@ final class ADPW_Import_Queue_Manager {
             $label = 'Actualizando productos';
         }
 
-        if ($status === 'completed') {
-            $progress = 100;
-        }
-        if ($status === 'running') {
-            $progress = max(1, $progress);
-        }
-
-        return [
-            'status' => $status,
-            'stage' => $stage,
-            'stage_label' => $label,
-            'progress' => max(0, min(100, $progress)),
-            'processed_entries' => $processed,
-            'total_entries' => $total,
-            'updated_at' => (int) ($job['updated_at'] ?? 0),
-            'results' => $job['results'] ?? null,
-            'error_general' => $job['error_general'] ?? '',
-            'debug_log' => array_slice((array) ($job['debug_log'] ?? []), -40),
-        ];
+        return ADPW_Background_Job_Utils::build_summary($job, $label, $processed, $total);
     }
 
     private static function append_debug(&$job, $message) {
-        if (!isset($job['debug_log']) || !is_array($job['debug_log'])) {
-            $job['debug_log'] = [];
-        }
-
-        $job['debug_log'][] = '[' . gmdate('H:i:s') . '] ' . $message;
-
-        if (count($job['debug_log']) > 300) {
-            $job['debug_log'] = array_slice($job['debug_log'], -300);
-        }
+        ADPW_Background_Job_Utils::append_debug($job, $message);
     }
 
     private static function get_job() {
-        $job = get_option(self::OPTION_JOB, null);
-        return is_array($job) ? $job : null;
+        return ADPW_Background_Job_Utils::get_job(self::OPTION_JOB);
     }
 
     private static function save_job($job) {
-        update_option(self::OPTION_JOB, $job, false);
+        ADPW_Background_Job_Utils::save_job(self::OPTION_JOB, $job);
     }
 
     private static function schedule_next_batch($job_id) {
-        $next = wp_next_scheduled(self::CRON_HOOK, [$job_id]);
-        if ($next) {
-            return;
-        }
-
-        wp_schedule_single_event(time() + 2, self::CRON_HOOK, [$job_id]);
+        ADPW_Background_Job_Utils::schedule_next_batch(self::CRON_HOOK, $job_id);
     }
 }

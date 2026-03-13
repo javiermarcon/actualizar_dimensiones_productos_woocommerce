@@ -8,10 +8,26 @@ final class ADPW_Category_Metadata_Page {
     private const NONCE_ACTION = 'guardar_metadata_por_categoria_action';
     private const NONCE_FIELD = 'guardar_metadata_por_categoria_nonce';
     private const POST_FIELD_METADATA = 'metadata_categoria';
+    private const MANUAL_NONCE_ACTION = 'adpw_category_tree_manual_batch';
+    private const MANUAL_NONCE_FIELD = 'adpw_category_tree_manual_batch_nonce';
 
     public static function render_page() {
         echo '<div class="wrap">';
         echo '<h1>Árbol de categorías</h1>';
+
+        $manual_message = '';
+        if (
+            isset($_POST['adpw_run_category_tree_batch']) &&
+            isset($_POST[self::MANUAL_NONCE_FIELD]) &&
+            wp_verify_nonce(sanitize_text_field(wp_unslash($_POST[self::MANUAL_NONCE_FIELD])), self::MANUAL_NONCE_ACTION)
+        ) {
+            $manual = ADPW_Category_Update_Queue_Manager::run_batch_now();
+            if (!empty($manual['error_general'])) {
+                echo '<div class="notice notice-error"><p>' . esc_html($manual['error_general']) . '</p></div>';
+            } else {
+                $manual_message = 'Se ejecutó manualmente un lote de actualización del árbol.';
+            }
+        }
 
         $is_save_request = (
             isset($_SERVER['REQUEST_METHOD']) &&
@@ -34,6 +50,10 @@ final class ADPW_Category_Metadata_Page {
 
         $settings = ADPW_Settings::get();
         $auto_update_products = !empty($settings['actualizar_productos_desde_categorias']);
+        $ajax_nonce = wp_create_nonce('adpw_category_update_ajax');
+        if ($manual_message !== '') {
+            echo '<div class="notice notice-success"><p>' . esc_html($manual_message) . '</p></div>';
+        }
 
         $categories = get_terms([
             'taxonomy' => 'product_cat',
@@ -87,6 +107,27 @@ final class ADPW_Category_Metadata_Page {
 
         echo '<p><input type="submit" name="guardar_metadata_categorias" value="Guardar metadata" class="button button-primary"></p>';
         echo '</form>';
+
+        echo '<form method="post" style="margin-top:8px;">';
+        wp_nonce_field(self::MANUAL_NONCE_ACTION, self::MANUAL_NONCE_FIELD);
+        echo '<button type="submit" class="button" name="adpw_run_category_tree_batch" value="1">Procesar siguiente lote ahora</button>';
+        echo '</form>';
+
+        ADPW_Admin_Job_Progress_UI::render_progress_markup('adpw-category-tree');
+        ADPW_Admin_Job_Progress_UI::render_status_snapshot('Estado actualización de productos', ADPW_Category_Update_Queue_Manager::get_job_snapshot(), 'adpw-category-tree');
+        ADPW_Admin_Job_Progress_UI::render_polling_js([
+            'prefix' => 'adpw-category-tree',
+            'nonce' => $ajax_nonce,
+            'statusAction' => 'adpw_category_update_status',
+            'runBatchAction' => 'adpw_category_update_run_batch',
+            'startFormId' => 'adpw-category-metadata-form',
+            'startButtonId' => '',
+            'validateInputId' => '',
+            'startText' => 'Guardando metadata e iniciando actualización...',
+            'completedText' => 'Actualización del árbol completada',
+            'errorText' => 'La actualización del árbol falló.',
+            'emptyInputMessage' => '',
+        ]);
         self::render_payload_script();
         echo '</div>';
     }
@@ -134,13 +175,22 @@ final class ADPW_Category_Metadata_Page {
         ];
 
         if ($should_update_products && !empty($category_ids)) {
-            $updated_products = ADPW_Category_Metadata_Manager::update_products_using_most_specific_category($category_ids);
-            $result['detalle_productos'] = sprintf('Productos actualizados desde metadata: %d.', $updated_products);
+            $job = ADPW_Category_Update_Queue_Manager::start_job($category_ids, (int) ($settings['categorias_por_lote'] ?? 20));
+            if (!empty($job['error_general'])) {
+                $result['detalle_productos'] = $job['error_general'];
+            } elseif ((int) ($job['total_entries'] ?? 0) === 0) {
+                $result['detalle_productos'] = 'No hay productos afectados para actualizar.';
+            } else {
+                $result['detalle_productos'] = sprintf(
+                    'Actualización de productos iniciada en segundo plano. Job ID: %s. Productos en cola: %d.',
+                    $job['job_id'] ?? 'N/A',
+                    (int) ($job['total_entries'] ?? 0)
+                );
+            }
         }
 
         return $result;
     }
-
     private static function render_category_rows($parent_id, $categories_by_parent, $shipping_classes, $level) {
         if (empty($categories_by_parent[$parent_id])) {
             return;

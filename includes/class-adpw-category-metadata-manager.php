@@ -75,9 +75,23 @@ final class ADPW_Category_Metadata_Manager {
     }
 
     public static function update_products_using_most_specific_category($category_ids) {
+        $queue = self::build_product_queue_for_categories($category_ids);
+        $shipping_class_cache = [];
+        $updated_products = 0;
+
+        foreach ($queue as $queue_item) {
+            if (self::apply_category_metadata_to_product_id((int) $queue_item['product_id'], (int) $queue_item['category_id'], $shipping_class_cache, null)) {
+                $updated_products++;
+            }
+        }
+
+        return $updated_products;
+    }
+
+    public static function build_product_queue_for_categories($category_ids) {
         $category_ids = array_values(array_unique(array_map('absint', $category_ids)));
         if (empty($category_ids)) {
-            return 0;
+            return [];
         }
 
         $product_ids = get_posts([
@@ -93,15 +107,9 @@ final class ADPW_Category_Metadata_Manager {
         ]);
 
         $depth_cache = [];
-        $shipping_class_cache = [];
-        $updated_products = 0;
+        $queue = [];
 
         foreach ($product_ids as $product_id) {
-            $product = wc_get_product($product_id);
-            if (!$product) {
-                continue;
-            }
-
             $product_term_ids = wp_get_post_terms($product_id, 'product_cat', ['fields' => 'ids']);
             if (is_wp_error($product_term_ids) || empty($product_term_ids)) {
                 continue;
@@ -113,16 +121,61 @@ final class ADPW_Category_Metadata_Manager {
             }
 
             $selected_category_id = self::pick_deepest_category($candidate_ids, $depth_cache);
-            if (!$selected_category_id) {
+            if ($selected_category_id <= 0) {
                 continue;
             }
 
-            if (self::apply_category_metadata_to_product($product, $selected_category_id, $shipping_class_cache)) {
-                $updated_products++;
-            }
+            $queue[] = [
+                'product_id' => (int) $product_id,
+                'category_id' => $selected_category_id,
+            ];
         }
 
-        return $updated_products;
+        return $queue;
+    }
+
+    public static function process_product_queue_batch(&$job) {
+        $batch_size = max(1, (int) ($job['batch_size'] ?? 1));
+        $cursor = (int) ($job['product_cursor'] ?? 0);
+        $product_queue = isset($job['product_queue']) && is_array($job['product_queue']) ? $job['product_queue'] : [];
+
+        if ($cursor >= count($product_queue)) {
+            $job['status'] = 'completed';
+            return;
+        }
+
+        if (!isset($job['runtime']) || !is_array($job['runtime'])) {
+            $job['runtime'] = [];
+        }
+        if (!isset($job['runtime']['shipping_class_cache']) || !is_array($job['runtime']['shipping_class_cache'])) {
+            $job['runtime']['shipping_class_cache'] = [];
+        }
+
+        $processed = 0;
+        while ($cursor < count($product_queue) && $processed < $batch_size) {
+            $queue_item = $product_queue[$cursor] ?? [];
+            $cursor++;
+            $processed++;
+
+            $product_id = isset($queue_item['product_id']) ? (int) $queue_item['product_id'] : 0;
+            $category_id = isset($queue_item['category_id']) ? (int) $queue_item['category_id'] : 0;
+            if ($product_id <= 0 || $category_id <= 0) {
+                continue;
+            }
+
+            self::apply_category_metadata_to_product_id(
+                $product_id,
+                $category_id,
+                $job['runtime']['shipping_class_cache'],
+                $job['results']
+            );
+        }
+
+        $job['product_cursor'] = $cursor;
+
+        if ($cursor >= count($product_queue)) {
+            $job['status'] = 'completed';
+        }
     }
 
     private static function save_numeric_meta($term_id, $meta_key, $value) {
@@ -150,6 +203,25 @@ final class ADPW_Category_Metadata_Manager {
         }
 
         return $selected_id;
+    }
+
+    private static function apply_category_metadata_to_product_id($product_id, $category_id, &$shipping_class_cache, &$results = null) {
+        $product = wc_get_product($product_id);
+        if (!$product) {
+            if (is_array($results)) {
+                $results['errores'] = (int) ($results['errores'] ?? 0) + 1;
+                self::append_limited($results['detalles'], 'No se pudo cargar el producto con ID ' . $product_id . '.');
+            }
+            return false;
+        }
+
+        $updated = self::apply_category_metadata_to_product($product, $category_id, $shipping_class_cache);
+        if ($updated && is_array($results)) {
+            $results['totales'] = (int) ($results['totales'] ?? 0) + 1;
+            self::append_limited($results['productos_modificados'], 'Metadata aplicada a ' . $product->get_name() . ' (ID: ' . $product_id . ') usando categoría ' . $category_id . '.');
+        }
+
+        return $updated;
     }
 
     private static function apply_category_metadata_to_product($product, $category_id, &$shipping_class_cache) {
@@ -205,5 +277,15 @@ final class ADPW_Category_Metadata_Manager {
         }
 
         return $shipping_class_cache[$shipping_slug];
+    }
+
+    private static function append_limited(&$target, $message, $limit = 250) {
+        if (!is_array($target)) {
+            $target = [];
+        }
+        if (count($target) >= $limit) {
+            return;
+        }
+        $target[] = $message;
     }
 }

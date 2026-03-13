@@ -8,7 +8,6 @@ final class ADPW_Category_Metadata_Page {
     private const NONCE_ACTION = 'guardar_metadata_por_categoria_action';
     private const NONCE_FIELD = 'guardar_metadata_por_categoria_nonce';
     private const POST_FIELD_METADATA = 'metadata_categoria';
-    private const POST_FIELD_UPDATE_PRODUCTS = 'actualizar_productos_desde_categorias';
 
     public static function render_page() {
         echo '<div class="wrap">';
@@ -32,6 +31,9 @@ final class ADPW_Category_Metadata_Page {
                 echo '</div>';
             }
         }
+
+        $settings = ADPW_Settings::get();
+        $auto_update_products = !empty($settings['actualizar_productos_desde_categorias']);
 
         $categories = get_terms([
             'taxonomy' => 'product_cat',
@@ -78,7 +80,8 @@ final class ADPW_Category_Metadata_Page {
         echo '</table>';
 
         echo '<p style="margin-top:12px;">';
-        echo '<label><input type="checkbox" name="' . esc_attr(self::POST_FIELD_UPDATE_PRODUCTS) . '" value="1"> Actualizar productos con esta metadata</label>';
+        echo 'Actualizar productos al guardar metadata: <strong>' . ($auto_update_products ? 'Sí' : 'No') . '</strong>. ';
+        echo '<a href="' . esc_url(admin_url('admin.php?page=adpw-settings&tab=tree')) . '">Cambiar en Configuración</a>.';
         echo '</p>';
         echo '<noscript><p style="color:#b32d2e;">Para guardar cambios en el árbol es necesario tener JavaScript habilitado.</p></noscript>';
 
@@ -104,7 +107,8 @@ final class ADPW_Category_Metadata_Page {
         if (!empty($_POST['adpw_no_changes']) || empty($metadata_by_category)) {
             return ['mensaje' => 'No hubo cambios para guardar.'];
         }
-        $should_update_products = !empty($_POST[self::POST_FIELD_UPDATE_PRODUCTS]);
+        $settings = ADPW_Settings::get();
+        $should_update_products = !empty($settings['actualizar_productos_desde_categorias']);
         $valid_shipping_slugs = ADPW_Category_Metadata_Manager::get_valid_shipping_slugs();
 
         if ($valid_shipping_slugs === null) {

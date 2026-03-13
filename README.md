@@ -70,7 +70,18 @@ Si una fila trae una `Categoría` cuyo nombre existe en varias ramas del árbol,
 
 - `Categoría` + `Tamaño`.
 
-### Checkboxes de configuración (guardados)
+### Configuración
+
+La pantalla `Configuración` está dividida en 3 pestañas:
+
+- `Común`
+  - Define el `Tamaño de lote` usado por `wp-cron`.
+- `Importación Excel`
+  - Contiene las opciones que afectan la importación desde planilla.
+- `Árbol de categorías`
+  - Contiene las opciones que afectan el guardado del árbol.
+
+#### Pestaña Importación Excel
 
 - `Actualizar siempre`
   - Fuerza actualización de dimensiones incluso si el producto ya tiene datos.
@@ -82,10 +93,18 @@ Si una fila trae una `Categoría` cuyo nombre existe en varias ramas del árbol,
 
 Estos valores se guardan y se aplican automáticamente en cada importación.
 
+#### Pestaña Común
+
 - `Tamaño de lote`
   - Define cuántos elementos procesa cada ejecución de cron.
   - En los pasos 1 y 2 el lote aplica sobre filas/categorías; en el paso 3 aplica sobre productos.
   - Ayuda a evitar `max_execution_time` en importaciones grandes.
+
+#### Pestaña Árbol de categorías
+
+- `Actualizar productos al guardar metadata`
+  - Si está activa, al guardar cambios en el árbol también se actualizan los productos afectados.
+  - Si un producto pertenece a múltiples categorías editadas, aplica la metadata de la categoría **más específica**.
 
 ## Árbol de categorías y metadata
 
@@ -107,7 +126,7 @@ Al guardar, los valores se almacenan en `term_meta` con estas keys:
 
 ### Aplicar metadata a productos
 
-Si marcás `Actualizar productos con esta metadata` al guardar:
+Si en `Configuración > Árbol de categorías` está activa la opción `Actualizar productos al guardar metadata`:
 
 - El plugin actualiza productos asociados a esas categorías.
 - Si un producto pertenece a múltiples categorías editadas, aplica la metadata de la categoría **más específica** (más profunda en el árbol).

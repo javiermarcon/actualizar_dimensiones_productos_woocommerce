@@ -1,0 +1,49 @@
+# PHPUnit
+.phpunit.cache/
+.phpunit.result.cache
+phpunit.xml.bak
+
+# Composer
+vendor/
+# Descomentar composer.lock si se quiere evtar que se fijen las versiones de las dependencias.
+# composer.lock
+
+# Build / dist
+build/
+dist/
+*.zip
+
+# Logs y debug
+*.log
+debug.log
+wp-content/debug.log
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Variables de entorno (si usás .env)
+.env
+.env.local
+.env.*.local
+
+# Node (si usás npm/yarn para assets)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Archivos temporales
+*.tmp
+*.temp
+*.bak
+*.cache

@@ -71,13 +71,13 @@ final class ADPW_Excel_Import_Page {
                     return '- ' . (string) $line;
                 }, $start_error_details));
             }
-            self::render_box('Error', $error_content, '#b32d2e', '#fff1f1');
+            ADPW_Admin_Job_Progress_UI::render_box('Error', $error_content, '#b32d2e', '#fff1f1');
         }
         if ($start_message !== '') {
-            self::render_box('Inicio', $start_message, '#1d2327', '#effff0');
+            ADPW_Admin_Job_Progress_UI::render_box('Inicio', $start_message, '#1d2327', '#effff0');
         }
         if ($manual_message !== '') {
-            self::render_box('Batch Manual', $manual_message, '#1d2327', '#eef6ff');
+            ADPW_Admin_Job_Progress_UI::render_box('Batch Manual', $manual_message, '#1d2327', '#eef6ff');
         }
 
         echo '<p><strong>Configuración activa:</strong> ';

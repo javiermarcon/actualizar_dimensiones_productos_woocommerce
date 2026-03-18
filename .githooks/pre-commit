@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+
+"${ROOT_DIR}/scripts/lint-staged-php.sh"
+"${ROOT_DIR}/scripts/lint-staged-phpcs.sh"
+"${ROOT_DIR}/scripts/lint-staged-phpstan.sh"

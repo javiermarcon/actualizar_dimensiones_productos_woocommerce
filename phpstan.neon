@@ -1,0 +1,13 @@
+parameters:
+    level: 0
+    paths:
+        - actualizar_dimensiones_productos_woocommerce.php
+        - includes
+        - tests
+    bootstrapFiles:
+        - tests/wp-stubs.php
+    excludePaths:
+        - vendor/*
+        - docs/*
+        - build/*
+    treatPhpDocTypesAsCertain: false

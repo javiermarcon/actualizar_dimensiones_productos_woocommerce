@@ -389,25 +389,11 @@ final class ADPW_Excel_Import_Service {
         $matched_ids = [];
 
         if ($categoria !== '') {
-            $key = strtolower(remove_accents($categoria));
+            $key = self::normalize_category_name($categoria);
             if (isset($name_to_ids_cache[$key])) {
                 $matched_ids = $name_to_ids_cache[$key];
             } else {
-                $terms = get_terms([
-                    'taxonomy' => 'product_cat',
-                    'hide_empty' => false,
-                    'name' => $categoria,
-                ]);
-
-                if (!is_wp_error($terms) && !empty($terms)) {
-                    foreach ($terms as $term) {
-                        if (!isset($term->term_id)) {
-                            continue;
-                        }
-                        $matched_ids[] = (int) $term->term_id;
-                    }
-                }
-
+                $matched_ids = self::find_category_ids_by_name($categoria);
                 $name_to_ids_cache[$key] = array_values(array_unique(array_filter($matched_ids)));
             }
         }
@@ -514,6 +500,86 @@ final class ADPW_Excel_Import_Service {
         $texto = strtolower(remove_accents($texto));
         $texto = preg_replace('/\s+/', ' ', $texto);
         return trim((string) $texto);
+    }
+
+    private static function normalize_category_name($value) {
+        return self::normalize_header($value);
+    }
+
+    private static function find_category_ids_by_name($category_name) {
+        $normalized = self::normalize_category_name($category_name);
+        if ($normalized === '') {
+            return [];
+        }
+
+        $lookup = self::get_product_category_lookup();
+        if (isset($lookup['exact'][$normalized])) {
+            return $lookup['exact'][$normalized];
+        }
+
+        $matched_ids = [];
+        foreach ($lookup['entries'] as $entry) {
+            $term_name = (string) ($entry['normalized_name'] ?? '');
+            if ($term_name === '') {
+                continue;
+            }
+
+            if (strpos($term_name, $normalized) !== false || strpos($normalized, $term_name) !== false) {
+                $matched_ids[] = (int) ($entry['term_id'] ?? 0);
+            }
+        }
+
+        return array_values(array_unique(array_filter(array_map('intval', $matched_ids))));
+    }
+
+    private static function get_product_category_lookup() {
+        static $lookup = null;
+
+        if (is_array($lookup)) {
+            return $lookup;
+        }
+
+        $lookup = [
+            'exact' => [],
+            'entries' => [],
+        ];
+
+        $terms = get_terms([
+            'taxonomy' => 'product_cat',
+            'hide_empty' => false,
+        ]);
+
+        if (is_wp_error($terms) || empty($terms)) {
+            return $lookup;
+        }
+
+        foreach ($terms as $term) {
+            if (!isset($term->term_id) || !isset($term->name)) {
+                continue;
+            }
+
+            $term_id = (int) $term->term_id;
+            $normalized_name = self::normalize_category_name($term->name);
+            if ($term_id <= 0 || $normalized_name === '') {
+                continue;
+            }
+
+            if (!isset($lookup['exact'][$normalized_name])) {
+                $lookup['exact'][$normalized_name] = [];
+            }
+
+            $lookup['exact'][$normalized_name][] = $term_id;
+            $lookup['entries'][] = [
+                'term_id' => $term_id,
+                'normalized_name' => $normalized_name,
+            ];
+        }
+
+        foreach ($lookup['exact'] as $name => $ids) {
+            $lookup['exact'][$name] = array_values(array_unique(array_map('intval', $ids)));
+        }
+
+        return $lookup;
     }
 
     private static function find_header_index($headers, $candidates) {

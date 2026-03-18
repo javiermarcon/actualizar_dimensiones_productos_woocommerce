@@ -66,9 +66,22 @@ Si una fila trae una `Categoría` cuyo nombre existe en varias ramas del árbol,
 
 - `Categoría` + una o más columnas de dimensiones/peso.
 
-1. **Solo tamaño por categoría**
+2. **Dimensiones por categoría + `ID Categoría`**
+
+- `Categoría` + columnas de dimensiones/peso + `ID Categoría`.
+- Si el nombre no coincide exactamente, el ID tiene prioridad para resolver la categoría.
+
+3. **Dimensiones por categoría + `Tamaño`**
+
+- `Categoría` + columnas de dimensiones/peso + `Tamaño`.
+
+4. **Solo tamaño por categoría**
 
 - `Categoría` + `Tamaño`.
+
+Además, la importación contempla los formatos de ejemplo incluidos en [`docs/dimensiones_accesorios_motos.xlsx`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/docs/dimensiones_accesorios_motos.xlsx), [`docs/dimensiones_actualizadas.xlsx`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/docs/dimensiones_actualizadas.xlsx), [`docs/dimensiones_completas_accesorios_motos.xlsx`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/docs/dimensiones_completas_accesorios_motos.xlsx), [`docs/dimensiones_completas_accesorios_motos_1.xlsx`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/docs/dimensiones_completas_accesorios_motos_1.xlsx) y [`docs/dimensiones_completas_accesorios_motos_2.xlsx`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/docs/dimensiones_completas_accesorios_motos_2.xlsx).
+
+Para los nombres de categoría, primero se intenta coincidencia exacta. Si no existe, se aplica una coincidencia flexible normalizando acentos, mayúsculas/minúsculas y variantes abreviadas como `Redes de Pulpo` frente a `Redes de Pulpo para motos`.
 
 ### Configuración
 

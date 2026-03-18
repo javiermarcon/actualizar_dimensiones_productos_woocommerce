@@ -1,5 +1,7 @@
 {
     "name": "javier/actualizar-dimensiones-productos-woocommerce",
+    "description": "Plugin de WordPress para actualizar dimensiones y clases de envio de productos WooCommerce desde planillas Excel.",
+    "license": "proprietary",
     "type": "wordpress-plugin",
     "require": {
         "phpoffice/phpspreadsheet": "^4.0"

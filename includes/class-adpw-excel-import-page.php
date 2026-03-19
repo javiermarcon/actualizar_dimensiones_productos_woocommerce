@@ -18,51 +18,17 @@ final class ADPW_Excel_Import_Page {
         $ajax_nonce = wp_create_nonce('adpw_import_ajax');
 
         $request_debug = self::build_request_debug();
-        $start_message = '';
-        $start_error = '';
-        $start_error_details = [];
-        $manual_message = '';
-
-        $is_start_post = (
-            isset($_SERVER['REQUEST_METHOD']) &&
-            strtoupper((string) $_SERVER['REQUEST_METHOD']) === 'POST' &&
-            isset($_POST[self::START_NONCE_FIELD])
+        $actions = ADPW_Excel_Import_Page_Actions::handle_requests(
+            $settings,
+            self::START_NONCE_ACTION,
+            self::START_NONCE_FIELD,
+            self::MANUAL_NONCE_ACTION,
+            self::MANUAL_NONCE_FIELD
         );
-
-        if ($is_start_post) {
-            $nonce_valid = wp_verify_nonce(sanitize_text_field(wp_unslash($_POST[self::START_NONCE_FIELD])), self::START_NONCE_ACTION);
-            if (!$nonce_valid) {
-                $start_error = 'POST detectado pero nonce inválido en inicio de importación.';
-            } else {
-                $start = ADPW_Import_Queue_Manager::start_import_job($_FILES['archivo_excel'] ?? null, $settings);
-                if (!empty($start['error_general'])) {
-                    $start_error = $start['error_general'];
-                    if (!empty($start['detalles']) && is_array($start['detalles'])) {
-                        $start_error_details = $start['detalles'];
-                    }
-                    if (!empty($start['debug_lines']) && is_array($start['debug_lines'])) {
-                        foreach ($start['debug_lines'] as $line) {
-                            $start_error_details[] = 'debug: ' . (string) $line;
-                        }
-                    }
-                } else {
-                    $start_message = 'Importación iniciada en segundo plano. Job ID: ' . ($start['job_id'] ?? 'N/A');
-                }
-            }
-        }
-
-        if (
-            isset($_POST['adpw_run_manual_batch']) &&
-            isset($_POST[self::MANUAL_NONCE_FIELD]) &&
-            wp_verify_nonce(sanitize_text_field(wp_unslash($_POST[self::MANUAL_NONCE_FIELD])), self::MANUAL_NONCE_ACTION)
-        ) {
-            $manual = ADPW_Import_Queue_Manager::run_batch_now();
-            if (!empty($manual['error_general'])) {
-                $start_error = $manual['error_general'];
-            } else {
-                $manual_message = 'Se ejecutó manualmente un lote de importación.';
-            }
-        }
+        $start_message = (string) ($actions['start_message'] ?? '');
+        $start_error = (string) ($actions['start_error'] ?? '');
+        $start_error_details = isset($actions['start_error_details']) && is_array($actions['start_error_details']) ? $actions['start_error_details'] : [];
+        $manual_message = (string) ($actions['manual_message'] ?? '');
 
         if ($start_error !== '') {
             $error_content = $start_error;

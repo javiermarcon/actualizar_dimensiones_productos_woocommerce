@@ -15,18 +15,10 @@ final class ADPW_Category_Metadata_Page {
         echo '<div class="wrap">';
         echo '<h1>Árbol de categorías</h1>';
 
-        $manual_message = '';
-        if (
-            isset($_POST['adpw_run_category_tree_batch']) &&
-            isset($_POST[self::MANUAL_NONCE_FIELD]) &&
-            wp_verify_nonce(sanitize_text_field(wp_unslash($_POST[self::MANUAL_NONCE_FIELD])), self::MANUAL_NONCE_ACTION)
-        ) {
-            $manual = ADPW_Category_Update_Queue_Manager::run_batch_now();
-            if (!empty($manual['error_general'])) {
-                echo '<div class="notice notice-error"><p>' . esc_html($manual['error_general']) . '</p></div>';
-            } else {
-                $manual_message = 'Se ejecutó manualmente un lote de actualización del árbol.';
-            }
+        $manual = ADPW_Category_Metadata_Page_Actions::handle_manual_batch(self::MANUAL_NONCE_ACTION, self::MANUAL_NONCE_FIELD);
+        $manual_message = (string) ($manual['manual_message'] ?? '');
+        if (!empty($manual['manual_error'])) {
+            echo '<div class="notice notice-error"><p>' . esc_html($manual['manual_error']) . '</p></div>';
         }
 
         $is_save_request = (
@@ -133,22 +125,11 @@ final class ADPW_Category_Metadata_Page {
     }
 
     private static function handle_save_request() {
-        if (!current_user_can('manage_options')) {
-            return ['error' => 'No tenés permisos para guardar metadata.'];
-        }
-
-        if (
-            !isset($_POST[self::NONCE_FIELD]) ||
-            !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST[self::NONCE_FIELD])), self::NONCE_ACTION)
-        ) {
-            return ['error' => 'No se pudo validar la solicitud.'];
-        }
-
-        $metadata_by_category = isset($_POST[self::POST_FIELD_METADATA]) ? (array) $_POST[self::POST_FIELD_METADATA] : [];
-        if (!empty($_POST['adpw_no_changes']) || empty($metadata_by_category)) {
-            return ['mensaje' => 'No hubo cambios para guardar.'];
-        }
-        return ADPW_Category_Metadata_Save_Service::save_from_request($metadata_by_category, ADPW_Settings::get());
+        return ADPW_Category_Metadata_Page_Actions::handle_save_request(
+            self::NONCE_ACTION,
+            self::NONCE_FIELD,
+            self::POST_FIELD_METADATA
+        );
     }
     private static function render_category_rows($parent_id, $categories_by_parent, $shipping_classes, $level) {
         if (empty($categories_by_parent[$parent_id])) {

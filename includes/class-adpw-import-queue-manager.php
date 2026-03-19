@@ -103,24 +103,19 @@ final class ADPW_Import_Queue_Manager {
 
     public static function ajax_start_import() {
         try {
-            if (!current_user_can('manage_options')) {
-                wp_send_json_error(['message' => 'No tenés permisos para iniciar la importación.']);
-            }
-
-            check_ajax_referer(self::AJAX_NONCE_ACTION, 'nonce');
+            ADPW_Ajax_Handler_Utils::ensure_manage_options('No tenés permisos para iniciar la importación.');
+            ADPW_Ajax_Handler_Utils::verify_nonce(self::AJAX_NONCE_ACTION, 'nonce');
 
             $settings = ADPW_Settings::get();
             $file = $_FILES['archivo_excel'] ?? null;
             $start = self::start_import_job($file, $settings);
             if (!empty($start['error_general'])) {
-                wp_send_json_error($start);
+                ADPW_Ajax_Handler_Utils::error($start);
             }
-            wp_send_json_success($start);
+            ADPW_Ajax_Handler_Utils::success($start);
         } catch (\Throwable $e) {
-            if (class_exists('ADPW_Test_Json_Response_Exception') && $e instanceof ADPW_Test_Json_Response_Exception) {
-                throw $e;
-            }
-            wp_send_json_error([
+            ADPW_Ajax_Handler_Utils::rethrow_test_json_exception($e);
+            ADPW_Ajax_Handler_Utils::error([
                 'error_general' => 'Excepción en start_import: ' . $e->getMessage(),
             ]);
         }
@@ -128,33 +123,22 @@ final class ADPW_Import_Queue_Manager {
 
     public static function ajax_import_status() {
         try {
-            if (!current_user_can('manage_options')) {
-                wp_send_json_error(['message' => 'No tenés permisos para consultar estado.']);
-            }
-
-            check_ajax_referer(self::AJAX_NONCE_ACTION, 'nonce');
+            ADPW_Ajax_Handler_Utils::ensure_manage_options('No tenés permisos para consultar estado.');
+            ADPW_Ajax_Handler_Utils::verify_nonce(self::AJAX_NONCE_ACTION, 'nonce');
 
             $job = self::get_job();
             if (!$job) {
-                wp_send_json_success([
-                    'status' => 'idle',
-                    'progress' => 0,
-                    'stage' => 'idle',
-                    'results' => null,
-                    'debug_log' => [],
-                ]);
+                ADPW_Ajax_Handler_Utils::success(ADPW_Ajax_Handler_Utils::idle_payload());
             }
 
             if (($job['status'] ?? '') === 'running' && function_exists('spawn_cron')) {
                 spawn_cron(time());
             }
 
-            wp_send_json_success(self::build_summary($job));
+            ADPW_Ajax_Handler_Utils::success(self::build_summary($job));
         } catch (\Throwable $e) {
-            if (class_exists('ADPW_Test_Json_Response_Exception') && $e instanceof ADPW_Test_Json_Response_Exception) {
-                throw $e;
-            }
-            wp_send_json_error([
+            ADPW_Ajax_Handler_Utils::rethrow_test_json_exception($e);
+            ADPW_Ajax_Handler_Utils::error([
                 'error_general' => 'Excepción en import_status: ' . $e->getMessage(),
             ]);
         }
@@ -162,21 +146,16 @@ final class ADPW_Import_Queue_Manager {
 
     public static function ajax_run_batch() {
         try {
-            if (!current_user_can('manage_options')) {
-                wp_send_json_error(['message' => 'No tenés permisos para ejecutar lotes.']);
-            }
-
-            check_ajax_referer(self::AJAX_NONCE_ACTION, 'nonce');
+            ADPW_Ajax_Handler_Utils::ensure_manage_options('No tenés permisos para ejecutar lotes.');
+            ADPW_Ajax_Handler_Utils::verify_nonce(self::AJAX_NONCE_ACTION, 'nonce');
             $summary = self::run_batch_now();
             if (!empty($summary['error_general'])) {
-                wp_send_json_error($summary);
+                ADPW_Ajax_Handler_Utils::error($summary);
             }
-            wp_send_json_success($summary);
+            ADPW_Ajax_Handler_Utils::success($summary);
         } catch (\Throwable $e) {
-            if (class_exists('ADPW_Test_Json_Response_Exception') && $e instanceof ADPW_Test_Json_Response_Exception) {
-                throw $e;
-            }
-            wp_send_json_error([
+            ADPW_Ajax_Handler_Utils::rethrow_test_json_exception($e);
+            ADPW_Ajax_Handler_Utils::error([
                 'error_general' => 'Excepción en run_batch: ' . $e->getMessage(),
             ]);
         }

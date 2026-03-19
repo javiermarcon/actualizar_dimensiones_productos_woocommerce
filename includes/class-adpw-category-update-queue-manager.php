@@ -48,7 +48,7 @@ final class ADPW_Category_Update_Queue_Manager {
             'debug_log' => [],
         ];
 
-        ADPW_Background_Job_Utils::append_debug($job, 'Job árbol creado. products=' . count($queue));
+        ADPW_Category_Update_Job_Store::append_debug($job, 'Job árbol creado. products=' . count($queue));
         self::save_job($job);
         if (($job['status'] ?? '') === 'running') {
             self::schedule_next_batch($job['id']);
@@ -88,33 +88,22 @@ final class ADPW_Category_Update_Queue_Manager {
 
     public static function ajax_status() {
         try {
-            if (!current_user_can('manage_options')) {
-                wp_send_json_error(['message' => 'No tenés permisos para consultar estado.']);
-            }
-
-            check_ajax_referer(self::AJAX_NONCE_ACTION, 'nonce');
+            ADPW_Ajax_Handler_Utils::ensure_manage_options('No tenés permisos para consultar estado.');
+            ADPW_Ajax_Handler_Utils::verify_nonce(self::AJAX_NONCE_ACTION, 'nonce');
 
             $job = self::get_job();
             if (!$job) {
-                wp_send_json_success([
-                    'status' => 'idle',
-                    'progress' => 0,
-                    'stage' => 'idle',
-                    'results' => null,
-                    'debug_log' => [],
-                ]);
+                ADPW_Ajax_Handler_Utils::success(ADPW_Ajax_Handler_Utils::idle_payload());
             }
 
             if (($job['status'] ?? '') === 'running' && function_exists('spawn_cron')) {
                 spawn_cron(time());
             }
 
-            wp_send_json_success(self::build_summary($job));
+            ADPW_Ajax_Handler_Utils::success(self::build_summary($job));
         } catch (\Throwable $e) {
-            if (class_exists('ADPW_Test_Json_Response_Exception') && $e instanceof ADPW_Test_Json_Response_Exception) {
-                throw $e;
-            }
-            wp_send_json_error([
+            ADPW_Ajax_Handler_Utils::rethrow_test_json_exception($e);
+            ADPW_Ajax_Handler_Utils::error([
                 'error_general' => 'Excepción en category_update_status: ' . $e->getMessage(),
             ]);
         }
@@ -122,21 +111,16 @@ final class ADPW_Category_Update_Queue_Manager {
 
     public static function ajax_run_batch() {
         try {
-            if (!current_user_can('manage_options')) {
-                wp_send_json_error(['message' => 'No tenés permisos para ejecutar lotes.']);
-            }
-
-            check_ajax_referer(self::AJAX_NONCE_ACTION, 'nonce');
+            ADPW_Ajax_Handler_Utils::ensure_manage_options('No tenés permisos para ejecutar lotes.');
+            ADPW_Ajax_Handler_Utils::verify_nonce(self::AJAX_NONCE_ACTION, 'nonce');
             $summary = self::run_batch_now();
             if (!empty($summary['error_general'])) {
-                wp_send_json_error($summary);
+                ADPW_Ajax_Handler_Utils::error($summary);
             }
-            wp_send_json_success($summary);
+            ADPW_Ajax_Handler_Utils::success($summary);
         } catch (\Throwable $e) {
-            if (class_exists('ADPW_Test_Json_Response_Exception') && $e instanceof ADPW_Test_Json_Response_Exception) {
-                throw $e;
-            }
-            wp_send_json_error([
+            ADPW_Ajax_Handler_Utils::rethrow_test_json_exception($e);
+            ADPW_Ajax_Handler_Utils::error([
                 'error_general' => 'Excepción en category_update_run_batch: ' . $e->getMessage(),
             ]);
         }
@@ -148,18 +132,18 @@ final class ADPW_Category_Update_Queue_Manager {
             return;
         }
 
-        ADPW_Background_Job_Utils::append_debug($job, 'Batch árbol start stage=' . $job['stage']);
+        ADPW_Category_Update_Job_Store::append_debug($job, 'Batch árbol start stage=' . $job['stage']);
 
         try {
             ADPW_Category_Metadata_Manager::process_product_queue_batch($job);
         } catch (\Throwable $e) {
             $job['status'] = 'failed';
             $job['error_general'] = 'Excepción en batch del árbol: ' . $e->getMessage();
-            ADPW_Background_Job_Utils::append_debug($job, 'ERROR ' . $job['error_general']);
+            ADPW_Category_Update_Job_Store::append_debug($job, 'ERROR ' . $job['error_general']);
         }
 
         $job['updated_at'] = time();
-        ADPW_Background_Job_Utils::append_debug($job, 'Batch árbol end status=' . $job['status']);
+        ADPW_Category_Update_Job_Store::append_debug($job, 'Batch árbol end status=' . $job['status']);
 
         self::save_job($job);
 
@@ -169,20 +153,18 @@ final class ADPW_Category_Update_Queue_Manager {
     }
 
     private static function build_summary($job) {
-        $total = count((array) ($job['product_queue'] ?? []));
-        $processed = (int) ($job['product_cursor'] ?? 0);
-        return ADPW_Background_Job_Utils::build_summary($job, 'Actualizando productos desde árbol de categorías', $processed, $total);
+        return ADPW_Category_Update_Job_Summary::build_summary($job);
     }
 
     private static function get_job() {
-        return ADPW_Background_Job_Utils::get_job(self::OPTION_JOB);
+        return ADPW_Category_Update_Job_Store::get_job(self::OPTION_JOB);
     }
 
     private static function save_job($job) {
-        ADPW_Background_Job_Utils::save_job(self::OPTION_JOB, $job);
+        ADPW_Category_Update_Job_Store::save_job(self::OPTION_JOB, $job);
     }
 
     private static function schedule_next_batch($job_id) {
-        ADPW_Background_Job_Utils::schedule_next_batch(self::CRON_HOOK, $job_id);
+        ADPW_Category_Update_Job_Store::schedule_next_batch(self::CRON_HOOK, $job_id);
     }
 }

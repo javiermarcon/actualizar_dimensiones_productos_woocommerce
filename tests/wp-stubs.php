@@ -11,6 +11,19 @@ if (!class_exists('WP_Error')) {
     }
 }
 
+if (!class_exists('ADPW_Test_Json_Response_Exception')) {
+    class ADPW_Test_Json_Response_Exception extends Exception {
+        public bool $success;
+        public $payload;
+
+        public function __construct(bool $success, $payload) {
+            parent::__construct('JSON response captured');
+            $this->success = $success;
+            $this->payload = $payload;
+        }
+    }
+}
+
 if (!class_exists('WP_Term')) {
     class WP_Term {
         public int $term_id = 0;
@@ -128,6 +141,21 @@ if (!isset($GLOBALS['adpw_test_products'])) {
 if (!isset($GLOBALS['adpw_test_scheduled_events'])) {
     $GLOBALS['adpw_test_scheduled_events'] = [];
 }
+if (!isset($GLOBALS['adpw_test_terms_errors'])) {
+    $GLOBALS['adpw_test_terms_errors'] = [];
+}
+if (!isset($GLOBALS['adpw_test_spawn_cron_calls'])) {
+    $GLOBALS['adpw_test_spawn_cron_calls'] = [];
+}
+if (!isset($GLOBALS['adpw_test_current_user_can'])) {
+    $GLOBALS['adpw_test_current_user_can'] = true;
+}
+if (!isset($GLOBALS['adpw_test_verify_nonce'])) {
+    $GLOBALS['adpw_test_verify_nonce'] = true;
+}
+if (!isset($GLOBALS['adpw_test_check_ajax_referer'])) {
+    $GLOBALS['adpw_test_check_ajax_referer'] = true;
+}
 
 if (!function_exists('adpw_test_reset_wp_stubs')) {
     function adpw_test_reset_wp_stubs(): void {
@@ -139,6 +167,11 @@ if (!function_exists('adpw_test_reset_wp_stubs')) {
         $GLOBALS['adpw_test_ancestors'] = [];
         $GLOBALS['adpw_test_products'] = [];
         $GLOBALS['adpw_test_scheduled_events'] = [];
+        $GLOBALS['adpw_test_terms_errors'] = [];
+        $GLOBALS['adpw_test_spawn_cron_calls'] = [];
+        $GLOBALS['adpw_test_current_user_can'] = true;
+        $GLOBALS['adpw_test_verify_nonce'] = true;
+        $GLOBALS['adpw_test_check_ajax_referer'] = true;
     }
 }
 
@@ -256,7 +289,7 @@ if (!function_exists('wp_unslash')) {
 
 if (!function_exists('wp_verify_nonce')) {
     function wp_verify_nonce(string $nonce, string $action = ''): bool {
-        return true;
+        return (bool) $GLOBALS['adpw_test_verify_nonce'];
     }
 }
 
@@ -273,23 +306,25 @@ if (!function_exists('wp_nonce_field')) {
 
 if (!function_exists('check_ajax_referer')) {
     function check_ajax_referer(string $action = '', $query_arg = false, bool $stop = true): bool {
-        return true;
+        return (bool) $GLOBALS['adpw_test_check_ajax_referer'];
     }
 }
 
 if (!function_exists('current_user_can')) {
     function current_user_can(string $capability): bool {
-        return true;
+        return (bool) $GLOBALS['adpw_test_current_user_can'];
     }
 }
 
 if (!function_exists('wp_send_json_success')) {
     function wp_send_json_success($value = null): void {
+        throw new ADPW_Test_Json_Response_Exception(true, $value);
     }
 }
 
 if (!function_exists('wp_send_json_error')) {
     function wp_send_json_error($value = null): void {
+        throw new ADPW_Test_Json_Response_Exception(false, $value);
     }
 }
 
@@ -377,6 +412,7 @@ if (!function_exists('wp_schedule_single_event')) {
 
 if (!function_exists('spawn_cron')) {
     function spawn_cron(int $gmt_time = 0): void {
+        $GLOBALS['adpw_test_spawn_cron_calls'][] = $gmt_time;
     }
 }
 
@@ -387,9 +423,14 @@ if (!function_exists('is_wp_error')) {
 }
 
 if (!function_exists('get_terms')) {
-    function get_terms(array $args = []): array {
+    function get_terms(array $args = []) {
+        $taxonomy = (string) ($args['taxonomy'] ?? '');
+        if ($taxonomy !== '' && isset($GLOBALS['adpw_test_terms_errors'][$taxonomy])) {
+            return $GLOBALS['adpw_test_terms_errors'][$taxonomy];
+        }
+
         $terms = array_values((array) ($GLOBALS['adpw_test_terms'] ?? []));
-        if (!empty($args['taxonomy'])) {
+        if ($taxonomy !== '') {
             $terms = array_values(array_filter($terms, static function ($term) use ($args) {
                 return $term instanceof WP_Term && $term->taxonomy === $args['taxonomy'];
             }));

@@ -61,6 +61,13 @@ Limites y reglas entre dominios para `/home/javier/proyectos/wordpress/plugins/a
   - renderizar HTML admin
   - manejar settings globales fuera de lo que recibe como input
 
+Soporte asociado:
+
+- [`includes/class-adpw-excel-import-support.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-excel-import-support.php)
+  - solo helpers de encabezados, validacion y matching
+- [`includes/class-adpw-excel-product-update-service.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-excel-product-update-service.php)
+  - solo aplicacion de cambios sobre productos
+
 ## 5) Metadata por categoria
 
 - Archivo:
@@ -75,6 +82,11 @@ Limites y reglas entre dominios para `/home/javier/proyectos/wordpress/plugins/a
   - parsear Excel
   - registrar AJAX o cron
   - renderizar UI
+
+Servicio asociado:
+
+- [`includes/class-adpw-category-metadata-save-service.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-category-metadata-save-service.php)
+  - recibe payload ya validado desde la page y decide si dispara job
 
 ## 6) Category update orchestration
 

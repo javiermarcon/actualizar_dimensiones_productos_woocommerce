@@ -47,6 +47,13 @@ La arquitectura esta separada por flujo funcional:
 
 La etapa intermedia usa un JSON temporal en uploads para desacoplar parseo de escritura masiva.
 
+Soporte extraido:
+
+- [`includes/class-adpw-excel-import-support.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-excel-import-support.php)
+  - encabezados, columnas, validacion y matching de categorias
+- [`includes/class-adpw-excel-product-update-service.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-excel-product-update-service.php)
+  - actualizacion de dimensiones y clase de envio
+
 ## Metadata de categorias
 
 ### Servicio de negocio
@@ -57,6 +64,8 @@ La etapa intermedia usa un JSON temporal en uploads para desacoplar parseo de es
 - cola de productos afectados
 - aplicacion de metadata a productos
 - eleccion de la categoria mas profunda
+
+[`includes/class-adpw-category-metadata-save-service.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-category-metadata-save-service.php) encapsula el guardado desde request y el disparo opcional del job de actualizacion.
 
 ### Cola
 

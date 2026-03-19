@@ -42,4 +42,38 @@ final class ADPWCategoryMetadataSaveServiceTest extends TestCase {
         self::assertStringContainsString('Job ID', $result['detalle_productos']);
         self::assertArrayHasKey('adpw_category_update_job', $GLOBALS['adpw_test_options']);
     }
+
+    public function testSaveFromRequestReturnsErrorWhenShippingClassesCannotBeValidated(): void {
+        $GLOBALS['adpw_test_terms_errors']['product_shipping_class'] = new WP_Error();
+
+        $result = ADPW_Category_Metadata_Save_Service::save_from_request([
+            12 => [
+                'clase_envio' => 'premium',
+            ],
+        ], []);
+
+        self::assertSame('No se pudieron validar las clases de envío disponibles.', $result['error']);
+    }
+
+    public function testSaveFromRequestSkipsBackgroundJobWhenAutoUpdateIsDisabled(): void {
+        $shippingTerm = new WP_Term();
+        $shippingTerm->term_id = 90;
+        $shippingTerm->slug = 'premium';
+        $shippingTerm->name = 'Premium';
+        $shippingTerm->taxonomy = 'product_shipping_class';
+        $GLOBALS['adpw_test_terms'] = [$shippingTerm];
+
+        $result = ADPW_Category_Metadata_Save_Service::save_from_request([
+            12 => [
+                'clase_envio' => 'premium',
+                'peso' => '1',
+            ],
+        ], [
+            'actualizar_productos_desde_categorias' => 0,
+        ]);
+
+        self::assertSame('Se actualizaron 1 categorías.', $result['mensaje']);
+        self::assertArrayNotHasKey('detalle_productos', $result);
+        self::assertArrayNotHasKey('adpw_category_update_job', $GLOBALS['adpw_test_options']);
+    }
 }

@@ -2,19 +2,19 @@
 
 declare(strict_types=1);
 
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PHPUnit\Framework\TestCase;
 
 final class ADPWExcelImportServiceTest extends TestCase {
     protected function tearDown(): void {
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Support::class, 'product_category_lookup', null);
         adpw_test_reset_wp_stubs();
     }
 
     public function testNormalizeHeaderRemovesAccentsAndNormalizesSpacing(): void {
-        $normalized = $this->invokePrivateMethod(
-            ADPW_Excel_Import_Service::class,
-            'normalize_header',
-            ["  Tamaño_-  Grande \t"]
-        );
+        $normalized = ADPW_Excel_Import_Support::normalize_header("  Tamaño_-  Grande \t");
 
         self::assertSame('tamano grande', $normalized);
     }
@@ -26,13 +26,43 @@ final class ADPWExcelImportServiceTest extends TestCase {
             3 => 'tamano',
         ];
 
-        $index = $this->invokePrivateMethod(
-            ADPW_Excel_Import_Service::class,
-            'find_header_index',
-            [$headers, ['tamaño', 'size']]
-        );
+        $index = ADPW_Excel_Import_Support::find_header_index($headers, ['tamaño', 'size']);
 
         self::assertSame(3, $index);
+    }
+
+    public function testBuildColumnsDetectsSupportedAliases(): void {
+        $columns = ADPW_Excel_Import_Support::build_columns([
+            1 => 'categoria',
+            2 => 'longitud (cm)',
+            3 => 'ancho(cm)',
+            4 => 'alto',
+            5 => 'peso',
+            6 => 'id categoria woocommerce',
+            7 => 'talle',
+        ]);
+
+        self::assertSame(1, $columns['categoria']);
+        self::assertSame(2, $columns['largo']);
+        self::assertSame(3, $columns['ancho']);
+        self::assertSame(4, $columns['profundidad']);
+        self::assertSame(5, $columns['peso']);
+        self::assertSame(6, $columns['idcat']);
+        self::assertSame(7, $columns['tamano']);
+    }
+
+    public function testGetHeadersNormalizesSpreadsheetHeaderRow(): void {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setCellValue('A1', ' Categoría ');
+        $sheet->setCellValue('B1', 'Tamaño');
+        $sheet->setCellValue('C1', 'Peso (kg)');
+
+        $headers = ADPW_Excel_Import_Support::get_headers($sheet);
+
+        self::assertSame('categoria', $headers[1]);
+        self::assertSame('tamano', $headers[2]);
+        self::assertSame('peso (kg)', $headers[3]);
     }
 
     public function testFindCategoryIdsByNameFallsBackToFlexibleMatch(): void {
@@ -44,42 +74,91 @@ final class ADPWExcelImportServiceTest extends TestCase {
 
         $GLOBALS['adpw_test_terms'] = [$term];
 
-        $ids = $this->invokePrivateMethod(
-            ADPW_Excel_Import_Service::class,
-            'find_category_ids_by_name',
-            ['Redes de Pulpo']
-        );
+        $ids = ADPW_Excel_Import_Support::find_category_ids_by_name('Redes de Pulpo');
 
         self::assertSame([99], $ids);
     }
 
     public function testValidateHeadersReturnsWarningWhenSizeColumnIsMissing(): void {
-        $result = $this->invokePrivateMethod(
-            ADPW_Excel_Import_Service::class,
-            'validate_headers',
-            [[
-                'categoria' => 1,
-                'largo' => 2,
-                'ancho' => false,
-                'profundidad' => false,
-                'peso' => false,
-                'idcat' => false,
-                'tamano' => false,
-            ], [1 => 'categoria', 2 => 'largo (cm)'], false, true, false, false]
-        );
+        $result = ADPW_Excel_Import_Support::validate_headers([
+            'categoria' => 1,
+            'largo' => 2,
+            'ancho' => false,
+            'profundidad' => false,
+            'peso' => false,
+            'idcat' => false,
+            'tamano' => false,
+        ], [1 => 'categoria', 2 => 'largo (cm)'], false, true, false, false);
 
         self::assertArrayHasKey('warnings', $result);
         self::assertCount(1, $result['warnings']);
     }
 
+    public function testValidateHeadersReturnsErrorWhenRequiredHeadersAreMissing(): void {
+        $result = ADPW_Excel_Import_Support::validate_headers([
+            'categoria' => false,
+            'largo' => false,
+            'ancho' => false,
+            'profundidad' => false,
+            'peso' => false,
+            'idcat' => false,
+            'tamano' => false,
+        ], [1 => 'sku', 2 => 'descripcion'], true, false, false, true);
+
+        self::assertSame('No se encontraron los encabezados esperados en el archivo Excel.', $result['error_general']);
+        self::assertStringContainsString('Categoría', $result['detalles'][0]);
+        self::assertStringContainsString('sku, descripcion', $result['detalles'][1]);
+    }
+
+    public function testBuildModeDetectsOnlySizeImport(): void {
+        $result = ADPW_Excel_Import_Support::build_mode([
+            'actualizar_tam' => 1,
+        ], [
+            'largo' => false,
+            'ancho' => false,
+            'profundidad' => false,
+            'peso' => false,
+            'tamano' => 4,
+        ]);
+
+        self::assertTrue($result['faltan_dimensiones']);
+        self::assertTrue($result['mode']['solo_tamano_desde_excel']);
+        self::assertFalse($result['mode']['actualizar_tam_dimensiones']);
+    }
+
+    public function testResolveCategoryIdsForParseUsesIdFallback(): void {
+        $term = new WP_Term();
+        $term->term_id = 50;
+        $term->name = 'Otra categoria';
+        $term->slug = 'otra-categoria';
+        $term->taxonomy = 'product_cat';
+        $GLOBALS['adpw_test_terms'] = [$term];
+        $errors = [];
+        $nameCache = [];
+        $idCache = [];
+
+        $ids = ADPW_Excel_Import_Support::resolve_category_ids_for_parse('', 50, 2, $errors, $nameCache, $idCache);
+
+        self::assertSame([50], $ids);
+        self::assertSame([], $errors);
+    }
+
+    public function testResolveCategoryIdsForParseRecordsErrorWhenCategoryDoesNotExist(): void {
+        $errors = [];
+        $nameCache = [];
+        $idCache = [];
+
+        $ids = ADPW_Excel_Import_Support::resolve_category_ids_for_parse('Sin Match', 0, 8, $errors, $nameCache, $idCache);
+
+        self::assertSame([], $ids);
+        self::assertCount(1, $errors);
+        self::assertStringContainsString("Fila 8: No se encontró la categoría 'Sin Match'.", $errors[0]);
+    }
+
     public function testUpdateShippingClassReturnsErrorWhenClassDoesNotExist(): void {
         $product = new WC_Product(55, 'Casco');
 
-        $result = $this->invokePrivateMethod(
-            ADPW_Excel_Import_Service::class,
-            'update_shipping_class',
-            [$product, 'fantasma']
-        );
+        $result = ADPW_Excel_Product_Update_Service::update_shipping_class($product, 'fantasma');
 
         self::assertFalse($result['modificado']);
         self::assertStringContainsString('no encontrada', $result['detalles_errores']);
@@ -89,16 +168,12 @@ final class ADPWExcelImportServiceTest extends TestCase {
         $product = new WC_Product(77, 'Parrilla');
         $product->set_weight(1.2);
 
-        $result = $this->invokePrivateMethod(
-            ADPW_Excel_Import_Service::class,
-            'update_dimensions',
-            [$product, [
-                'peso' => 9.5,
-                'largo' => 10.0,
-                'ancho' => 20.0,
-                'profundidad' => 30.0,
-            ], false, 'Accesorios', 77]
-        );
+        $result = ADPW_Excel_Product_Update_Service::update_dimensions($product, [
+            'peso' => 9.5,
+            'largo' => 10.0,
+            'ancho' => 20.0,
+            'profundidad' => 30.0,
+        ], false, 'Accesorios', 77);
 
         self::assertTrue($result['modificado']);
         self::assertSame('1.2', $product->get_weight());
@@ -107,10 +182,256 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertSame('30', $product->get_height());
     }
 
-    private function invokePrivateMethod(string $className, string $methodName, array $arguments) {
-        $reflection = new ReflectionMethod($className, $methodName);
+    public function testProcessProductUpdateRecordsDimensionAndShippingChanges(): void {
+        $shippingTerm = new WP_Term();
+        $shippingTerm->term_id = 61;
+        $shippingTerm->name = 'Premium';
+        $shippingTerm->slug = 'premium';
+        $shippingTerm->taxonomy = 'product_shipping_class';
+        $GLOBALS['adpw_test_terms'] = [$shippingTerm];
+
+        $product = new WC_Product(200, 'Valija');
+        $product->set_shipping_class('base');
+        $GLOBALS['adpw_test_products'][200] = $product;
+        $results = [
+            'totales' => 0,
+            'parciales' => 0,
+            'errores' => 0,
+            'detalles' => [],
+            'productos_modificados' => [],
+        ];
+
+        ADPW_Excel_Product_Update_Service::process_product_update(200, [
+            'categoria' => 'Viaje',
+            'tamano' => 'premium',
+            'peso' => 1.1,
+            'largo' => 2.2,
+            'ancho' => 3.3,
+            'profundidad' => 4.4,
+        ], [
+            'actualizar_si' => 1,
+            'actualizar_cat' => 1,
+        ], [
+            'actualizar_tam_dimensiones' => true,
+            'solo_tamano_desde_excel' => false,
+        ], $results);
+
+        self::assertGreaterThan(0, $results['totales']);
+        self::assertSame(61, $product->get_shipping_class_id());
+        self::assertNotEmpty($results['detalles']);
+        self::assertNotEmpty($results['productos_modificados']);
+    }
+
+    public function testProcessParseSheetBatchBuildsCategoryMapAndTransitionsStage(): void {
+        $term = new WP_Term();
+        $term->term_id = 17;
+        $term->name = 'Baules';
+        $term->slug = 'baules';
+        $term->taxonomy = 'product_cat';
+        $GLOBALS['adpw_test_terms'] = [$term];
+
+        $uploadedFile = $this->createSpreadsheetFile([
+            ['Categoria', 'Tamaño', 'Peso (kg)', 'Largo (cm)', 'Ancho (cm)', 'Profundidad (cm)'],
+            ['Baules', 'grande', 8.5, 10, 20, 30],
+        ]);
+        $categoriesFile = tempnam(sys_get_temp_dir(), 'adpw-cat-');
+
+        $job = [
+            'uploaded_file_path' => $uploadedFile,
+            'categories_data_file' => $categoriesFile,
+            'columns' => [
+                'categoria' => 1,
+                'tamano' => 2,
+                'peso' => 3,
+                'largo' => 4,
+                'ancho' => 5,
+                'profundidad' => 6,
+                'idcat' => false,
+            ],
+            'batch_size' => 10,
+            'cursor_row' => 2,
+            'highest_row' => 5,
+            'empty_row_count' => 0,
+            'processed_rows' => 0,
+            'results' => [
+                'totales' => 0,
+                'parciales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+        ];
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'process_parse_sheet_batch', [&$job]);
+
+        $categoryMap = json_decode((string) file_get_contents($categoriesFile), true);
+
+        self::assertSame('save_category_meta', $job['stage']);
+        self::assertSame([17], $job['category_ids']);
+        self::assertSame(6, $job['cursor_row']);
+        self::assertSame('grande', $categoryMap['17']['tamano']);
+        self::assertSame(8.5, $categoryMap['17']['peso']);
+        self::assertSame(10, $categoryMap['17']['largo']);
+        self::assertSame(20, $categoryMap['17']['ancho']);
+        self::assertSame(30, $categoryMap['17']['profundidad']);
+
+        @unlink($uploadedFile);
+        @unlink($categoriesFile);
+    }
+
+    public function testProcessParseSheetBatchWarnsWhenCategoryMatchesMultipleTerms(): void {
+        $termOne = new WP_Term();
+        $termOne->term_id = 10;
+        $termOne->name = 'Redes de Pulpo chica';
+        $termOne->slug = 'redes-de-pulpo-chica';
+        $termOne->taxonomy = 'product_cat';
+
+        $termTwo = new WP_Term();
+        $termTwo->term_id = 11;
+        $termTwo->name = 'Redes de Pulpo para motos';
+        $termTwo->slug = 'redes-de-pulpo-para-motos';
+        $termTwo->taxonomy = 'product_cat';
+
+        $GLOBALS['adpw_test_terms'] = [$termOne, $termTwo];
+
+        $uploadedFile = $this->createSpreadsheetFile([
+            ['Categoria'],
+            ['Redes de Pulpo'],
+            [''],
+            [''],
+            [''],
+        ]);
+        $categoriesFile = tempnam(sys_get_temp_dir(), 'adpw-cat-');
+
+        $job = [
+            'uploaded_file_path' => $uploadedFile,
+            'categories_data_file' => $categoriesFile,
+            'columns' => [
+                'categoria' => 1,
+                'tamano' => false,
+                'peso' => false,
+                'largo' => false,
+                'ancho' => false,
+                'profundidad' => false,
+                'idcat' => false,
+            ],
+            'batch_size' => 10,
+            'cursor_row' => 2,
+            'highest_row' => 5,
+            'empty_row_count' => 0,
+            'processed_rows' => 0,
+            'results' => [
+                'totales' => 0,
+                'parciales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+        ];
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'process_parse_sheet_batch', [&$job]);
+
+        self::assertSame('save_category_meta', $job['stage']);
+        self::assertSame([10, 11], $job['category_ids']);
+        self::assertNotEmpty($job['results']['detalles']);
+        self::assertStringContainsString('coincide con 2 categorías', implode("\n", $job['results']['detalles']));
+
+        @unlink($uploadedFile);
+        @unlink($categoriesFile);
+    }
+
+    public function testProcessParseSheetBatchTracksMissingCategoriesAsErrors(): void {
+        $uploadedFile = $this->createSpreadsheetFile([
+            ['Categoria'],
+            ['Sin Match'],
+            [''],
+            [''],
+            [''],
+        ]);
+        $categoriesFile = tempnam(sys_get_temp_dir(), 'adpw-cat-');
+
+        $job = [
+            'uploaded_file_path' => $uploadedFile,
+            'categories_data_file' => $categoriesFile,
+            'columns' => [
+                'categoria' => 1,
+                'tamano' => false,
+                'peso' => false,
+                'largo' => false,
+                'ancho' => false,
+                'profundidad' => false,
+                'idcat' => false,
+            ],
+            'batch_size' => 10,
+            'cursor_row' => 2,
+            'highest_row' => 5,
+            'empty_row_count' => 0,
+            'processed_rows' => 0,
+            'results' => [
+                'totales' => 0,
+                'parciales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+        ];
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'process_parse_sheet_batch', [&$job]);
+
+        self::assertSame('save_category_meta', $job['stage']);
+        self::assertSame(1, $job['results']['errores']);
+        self::assertStringContainsString('No se encontró la categoría', implode("\n", $job['results']['detalles']));
+
+        @unlink($uploadedFile);
+        @unlink($categoriesFile);
+    }
+
+    public function testLoadJsonFileReturnsEmptyArrayForInvalidJson(): void {
+        $jsonFile = tempnam(sys_get_temp_dir(), 'adpw-json-');
+        file_put_contents($jsonFile, '{invalid');
+
+        $result = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'load_json_file', [$jsonFile]);
+
+        self::assertSame([], $result);
+        @unlink($jsonFile);
+    }
+
+    public function testSaveJsonFilePersistsEncodedData(): void {
+        $jsonFile = tempnam(sys_get_temp_dir(), 'adpw-json-');
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'save_json_file', [$jsonFile, ['ok' => true, 'count' => 2]]);
+
+        self::assertSame(['ok' => true, 'count' => 2], json_decode((string) file_get_contents($jsonFile), true));
+        @unlink($jsonFile);
+    }
+
+    private function createSpreadsheetFile(array $rows): string {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+
+        foreach ($rows as $rowIndex => $row) {
+            foreach ($row as $columnIndex => $value) {
+                $sheet->setCellValue(Coordinate::stringFromColumnIndex($columnIndex + 1) . (string) ($rowIndex + 1), $value);
+            }
+        }
+
+        $file = tempnam(sys_get_temp_dir(), 'adpw-xlsx-');
+        $writer = new Xlsx($spreadsheet);
+        $writer->save($file);
+
+        return $file;
+    }
+
+    private function invokePrivateStaticMethod(string $class, string $method, array $args = []) {
+        $reflection = new ReflectionMethod($class, $method);
         $reflection->setAccessible(true);
 
-        return $reflection->invokeArgs(null, $arguments);
+        return $reflection->invokeArgs(null, $args);
+    }
+
+    private function setPrivateStaticProperty(string $class, string $property, $value): void {
+        $reflection = new ReflectionProperty($class, $property);
+        $reflection->setAccessible(true);
+        $reflection->setValue(null, $value);
     }
 }

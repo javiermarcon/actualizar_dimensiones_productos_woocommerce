@@ -40,13 +40,22 @@ Mapa rapido del repositorio `/home/javier/proyectos/wordpress/plugins/actualizar
   - AJAX y cron del flujo Excel
 
 - [`includes/class-adpw-excel-import-service.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-excel-import-service.php)
-  - parseo de planilla
-  - validacion de encabezados
+  - orquestacion del flujo de importacion por etapas
+
+- [`includes/class-adpw-excel-import-support.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-excel-import-support.php)
+  - encabezados
+  - columnas
+  - validacion
   - matching de categorias
-  - actualizacion de metadata y productos
+
+- [`includes/class-adpw-excel-product-update-service.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-excel-product-update-service.php)
+  - actualizacion de dimensiones y clase de envio sobre productos
 
 - [`includes/class-adpw-category-metadata-page.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-category-metadata-page.php)
   - pantalla admin del arbol de categorias
+
+- [`includes/class-adpw-category-metadata-save-service.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-category-metadata-save-service.php)
+  - guardado de metadata desde request y disparo del job opcional
 
 - [`includes/class-adpw-category-update-queue-manager.php`](/home/javier/proyectos/wordpress/plugins/actualizar_dimensiones_productos_woocommerce/includes/class-adpw-category-update-queue-manager.php)
   - orquestacion del job de aplicacion de metadata por categoria

@@ -221,7 +221,17 @@ final class ADPW_Import_Queue_Manager {
             $label = 'Actualizando productos';
         }
 
-        return ADPW_Background_Job_Utils::build_summary($job, $label, $processed, $total);
+        $summary = ADPW_Background_Job_Utils::build_summary($job, $label, $processed, $total);
+
+        if ($status === 'completed') {
+            $summary['progress'] = 100;
+        } elseif ($status === 'running') {
+            $summary['progress'] = max(1, min(100, $progress));
+        } else {
+            $summary['progress'] = max(0, min(100, $progress));
+        }
+
+        return $summary;
     }
 
     private static function append_debug(&$job, $message) {

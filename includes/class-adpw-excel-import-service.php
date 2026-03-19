@@ -1,6 +1,5 @@
 <?php
 
-use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 if (!defined('ABSPATH')) {
@@ -37,30 +36,14 @@ final class ADPW_Excel_Import_Service {
             $spreadsheet = self::load_spreadsheet($uploaded_file_path);
             $sheet = $spreadsheet->getActiveSheet();
 
-            $headers = self::get_headers($sheet);
-            $columns = [
-                'categoria' => self::find_header_index($headers, ['categoria']),
-                'largo' => self::find_header_index($headers, ['largo (cm)', 'largo(cm)', 'largo', 'longitud (cm)', 'longitud(cm)', 'longitud']),
-                'ancho' => self::find_header_index($headers, ['ancho (cm)', 'ancho(cm)', 'ancho']),
-                'profundidad' => self::find_header_index($headers, ['profundidad (cm)', 'profundidad(cm)', 'profundidad', 'alto (cm)', 'alto(cm)', 'alto']),
-                'peso' => self::find_header_index($headers, ['peso (kg)', 'peso(kg)', 'peso']),
-                'idcat' => self::find_header_index($headers, ['id categoria', 'id categoria woocommerce', 'idcat', 'id']),
-                'tamano' => self::find_header_index($headers, ['tamano', 'tamaño', 'size', 'talle']),
-            ];
+            $headers = ADPW_Excel_Import_Support::get_headers($sheet);
+            $columns = ADPW_Excel_Import_Support::build_columns($headers);
 
             $actualizar_tam = !empty($settings['actualizar_tam']);
             $actualizar_cat = !empty($settings['actualizar_cat']);
-            $faltan_dimensiones = (
-                $columns['largo'] === false &&
-                $columns['ancho'] === false &&
-                $columns['profundidad'] === false &&
-                $columns['peso'] === false
-            );
-
-            $mode = [
-                'solo_tamano_desde_excel' => $actualizar_tam && $faltan_dimensiones && $columns['tamano'] !== false,
-                'actualizar_tam_dimensiones' => $actualizar_tam && !$faltan_dimensiones,
-            ];
+            $mode_config = ADPW_Excel_Import_Support::build_mode($settings, $columns);
+            $mode = $mode_config['mode'];
+            $faltan_dimensiones = $mode_config['faltan_dimensiones'];
 
             $debug_lines = [];
             $debug_lines[] = 'headers=' . wp_json_encode(array_values(array_filter($headers, static function ($value) {
@@ -73,7 +56,7 @@ final class ADPW_Excel_Import_Service {
             ]);
             $debug_lines[] = 'mode=' . wp_json_encode($mode);
 
-            $validation = self::validate_headers($columns, $headers, $actualizar_tam, $actualizar_cat, $mode['actualizar_tam_dimensiones'], $faltan_dimensiones);
+            $validation = ADPW_Excel_Import_Support::validate_headers($columns, $headers, $actualizar_tam, $actualizar_cat, $mode['actualizar_tam_dimensiones'], $faltan_dimensiones);
             if (!empty($validation['error_general'])) {
                 @unlink($uploaded_file_path);
                 $validation['debug_lines'] = $debug_lines;
@@ -172,7 +155,7 @@ final class ADPW_Excel_Import_Service {
             }
 
             $job['empty_row_count'] = 0;
-            $term_ids = self::resolve_category_ids_for_parse($entry['categoria'], (int) $entry['idcat'], $entry['row'], $job['results']['detalles'], $name_to_ids_cache, $id_to_id_cache);
+            $term_ids = ADPW_Excel_Import_Support::resolve_category_ids_for_parse($entry['categoria'], (int) $entry['idcat'], $entry['row'], $job['results']['detalles'], $name_to_ids_cache, $id_to_id_cache);
             if (empty($term_ids)) {
                 $job['results']['errores']++;
                 continue;
@@ -307,7 +290,7 @@ final class ADPW_Excel_Import_Service {
                 continue;
             }
 
-            self::process_product_update($product_id, $category_id, $entry, $job['settings'], $job['mode'], $job['results']);
+            ADPW_Excel_Product_Update_Service::process_product_update($product_id, $entry, $job['settings'], $job['mode'], $job['results']);
         }
 
         $job['product_cursor'] = $cursor;
@@ -322,101 +305,6 @@ final class ADPW_Excel_Import_Service {
         $category_ids = isset($job['category_ids']) && is_array($job['category_ids']) ? $job['category_ids'] : [];
         $job['product_queue'] = ADPW_Category_Metadata_Manager::build_product_queue_for_categories($category_ids);
         $job['product_cursor'] = 0;
-    }
-
-    private static function process_product_update($product_id, $category_id, $entry, $settings, $mode, &$results) {
-        $actualizar_si = !empty($settings['actualizar_si']);
-        $actualizar_cat = !empty($settings['actualizar_cat']);
-
-        $product = wc_get_product($product_id);
-        if (!$product) {
-            $results['errores']++;
-            self::append_limited($results['detalles'], 'No se pudo cargar el producto con ID ' . $product_id . '.');
-            return;
-        }
-
-        $dim_res = [
-            'modificado' => false,
-            'actualizacion_total' => false,
-            'log_producto' => '',
-            'detalles_errores' => '',
-        ];
-        $clase_modificada = false;
-
-        if (!empty($mode['actualizar_tam_dimensiones']) && ((float) $entry['peso'] > 0 || (float) $entry['largo'] > 0 || (float) $entry['ancho'] > 0 || (float) $entry['profundidad'] > 0)) {
-            $dim_res = self::update_dimensions($product, [
-                'peso' => (float) $entry['peso'],
-                'largo' => (float) $entry['largo'],
-                'ancho' => (float) $entry['ancho'],
-                'profundidad' => (float) $entry['profundidad'],
-            ], $actualizar_si, (string) ($entry['categoria'] ?? ''), $product_id);
-        }
-
-        $tamano = (string) ($entry['tamano'] ?? '');
-        if (($actualizar_cat || !empty($mode['solo_tamano_desde_excel'])) && $tamano !== '') {
-            $class_res = self::update_shipping_class($product, $tamano);
-            if (!empty($class_res['detalles_errores'])) {
-                self::append_limited($results['detalles'], $class_res['detalles_errores']);
-            }
-            if (!empty($class_res['log_producto'])) {
-                self::append_limited($results['detalles'], $class_res['log_producto']);
-            }
-            $clase_modificada = !empty($class_res['modificado']);
-        }
-
-        if (!empty($dim_res['modificado'])) {
-            if (!empty($dim_res['actualizacion_total'])) {
-                $results['totales']++;
-            } else {
-                $results['parciales']++;
-            }
-            if (!empty($dim_res['log_producto'])) {
-                self::append_limited($results['productos_modificados'], $dim_res['log_producto']);
-            }
-            if (!empty($dim_res['detalles_errores'])) {
-                self::append_limited($results['detalles'], $dim_res['detalles_errores']);
-            }
-        }
-
-        if (!empty($dim_res['modificado']) || $clase_modificada) {
-            $results['totales']++;
-        }
-    }
-
-    private static function resolve_category_ids_for_parse($categoria, $idcat, $row, &$detalles_errores, &$name_to_ids_cache, &$id_to_id_cache) {
-        $categoria = trim((string) $categoria);
-        $idcat = (int) $idcat;
-        $matched_ids = [];
-
-        if ($categoria !== '') {
-            $key = self::normalize_category_name($categoria);
-            if (isset($name_to_ids_cache[$key])) {
-                $matched_ids = $name_to_ids_cache[$key];
-            } else {
-                $matched_ids = self::find_category_ids_by_name($categoria);
-                $name_to_ids_cache[$key] = array_values(array_unique(array_filter($matched_ids)));
-            }
-        }
-
-        if ($idcat > 0) {
-            if (isset($id_to_id_cache[$idcat])) {
-                $matched_ids[] = (int) $id_to_id_cache[$idcat];
-            } else {
-                $term = get_term($idcat, 'product_cat');
-                if ($term && !is_wp_error($term)) {
-                    $id_to_id_cache[$idcat] = (int) $term->term_id;
-                    $matched_ids[] = (int) $term->term_id;
-                }
-            }
-        }
-
-        $matched_ids = array_values(array_unique(array_filter(array_map('intval', $matched_ids))));
-        if (!empty($matched_ids)) {
-            return $matched_ids;
-        }
-
-        self::append_limited($detalles_errores, "Fila {$row}: No se encontró la categoría '{$categoria}'.");
-        return [];
     }
 
     private static function cleanup_job_files($job) {
@@ -479,251 +367,4 @@ final class ADPW_Excel_Import_Service {
         return $reader->load($path);
     }
 
-    private static function get_headers($sheet) {
-        $encabezados = [];
-        $highestColumn = $sheet->getHighestColumn();
-        $highestColumnIndex = Coordinate::columnIndexFromString($highestColumn);
-
-        for ($col = 1; $col <= $highestColumnIndex; ++$col) {
-            $cell = $sheet->getCell([$col, 1]);
-            $encabezados[$col] = self::normalize_header($cell->getFormattedValue());
-        }
-
-        return $encabezados;
-    }
-
-    private static function normalize_header($valor) {
-        $texto = trim((string) $valor);
-        $texto = str_replace("\xEF\xBB\xBF", '', $texto);
-        $texto = str_replace("\xc2\xa0", ' ', $texto);
-        $texto = str_replace(['_', '-'], ' ', $texto);
-        $texto = strtolower(remove_accents($texto));
-        $texto = preg_replace('/\s+/', ' ', $texto);
-        return trim((string) $texto);
-    }
-
-    private static function normalize_category_name($value) {
-        return self::normalize_header($value);
-    }
-
-    private static function find_category_ids_by_name($category_name) {
-        $normalized = self::normalize_category_name($category_name);
-        if ($normalized === '') {
-            return [];
-        }
-
-        $lookup = self::get_product_category_lookup();
-        if (isset($lookup['exact'][$normalized])) {
-            return $lookup['exact'][$normalized];
-        }
-
-        $matched_ids = [];
-        foreach ($lookup['entries'] as $entry) {
-            $term_name = (string) ($entry['normalized_name'] ?? '');
-            if ($term_name === '') {
-                continue;
-            }
-
-            if (strpos($term_name, $normalized) !== false || strpos($normalized, $term_name) !== false) {
-                $matched_ids[] = (int) ($entry['term_id'] ?? 0);
-            }
-        }
-
-        return array_values(array_unique(array_filter(array_map('intval', $matched_ids))));
-    }
-
-    private static function get_product_category_lookup() {
-        static $lookup = null;
-
-        if (is_array($lookup)) {
-            return $lookup;
-        }
-
-        $lookup = [
-            'exact' => [],
-            'entries' => [],
-        ];
-
-        $terms = get_terms([
-            'taxonomy' => 'product_cat',
-            'hide_empty' => false,
-        ]);
-
-        if (is_wp_error($terms) || empty($terms)) {
-            return $lookup;
-        }
-
-        foreach ($terms as $term) {
-            if (!isset($term->term_id) || !isset($term->name)) {
-                continue;
-            }
-
-            $term_id = (int) $term->term_id;
-            $normalized_name = self::normalize_category_name($term->name);
-            if ($term_id <= 0 || $normalized_name === '') {
-                continue;
-            }
-
-            if (!isset($lookup['exact'][$normalized_name])) {
-                $lookup['exact'][$normalized_name] = [];
-            }
-
-            $lookup['exact'][$normalized_name][] = $term_id;
-            $lookup['entries'][] = [
-                'term_id' => $term_id,
-                'normalized_name' => $normalized_name,
-            ];
-        }
-
-        foreach ($lookup['exact'] as $name => $ids) {
-            $lookup['exact'][$name] = array_values(array_unique(array_map('intval', $ids)));
-        }
-
-        return $lookup;
-    }
-
-    private static function find_header_index($headers, $candidates) {
-        $normalized_candidates = array_map([self::class, 'normalize_header'], (array) $candidates);
-
-        foreach ($normalized_candidates as $candidate) {
-            $found = array_search($candidate, $headers, true);
-            if ($found !== false) {
-                return $found;
-            }
-        }
-
-        foreach ($headers as $index => $header) {
-            if ($header === '') {
-                continue;
-            }
-            foreach ($normalized_candidates as $candidate) {
-                if ($candidate === '') {
-                    continue;
-                }
-                if (strpos($header, $candidate) !== false) {
-                    return $index;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private static function validate_headers($columns, $headers, $actualizar_tam, $actualizar_cat, $actualizar_tam_dimensiones, $faltan_dimensiones) {
-        $required = ['Categoría'];
-        $warnings = [];
-
-        if ($actualizar_tam_dimensiones) {
-            $required[] = 'Largo (cm) o Ancho (cm) o Profundidad (cm) o Peso (kg)';
-        } elseif ($actualizar_tam && $columns['tamano'] === false) {
-            $required[] = 'Tamaño (para importación Categoría + tamaño)';
-        }
-
-        if ($actualizar_cat && $columns['tamano'] === false) {
-            $warnings[] = 'Configuración pide actualizar tamaño, pero no existe la columna "Tamaño". Se omite actualización de clase de envío en esta importación.';
-        }
-
-        if (
-            $columns['categoria'] === false ||
-            ($actualizar_tam && $faltan_dimensiones && $columns['tamano'] === false)
-        ) {
-            $detected = [];
-            foreach ($headers as $h) {
-                if ($h !== '') {
-                    $detected[] = $h;
-                }
-            }
-            return [
-                'error_general' => 'No se encontraron los encabezados esperados en el archivo Excel.',
-                'detalles' => [
-                    'Incluí al menos: ' . implode(', ', $required) . '.',
-                    'Encabezados detectados: ' . (!empty($detected) ? implode(', ', $detected) : '(ninguno)') . '.',
-                ],
-            ];
-        }
-
-        return [
-            'warnings' => $warnings,
-        ];
-    }
-
-    private static function update_dimensions($product, $incoming, $actualizar_si, $categoria, $product_id) {
-        $modificado = false;
-        $actualizacion_total = false;
-        $log_producto = '';
-
-        $peso_actual = $product->get_weight();
-        $largo_actual = $product->get_length();
-        $ancho_actual = $product->get_width();
-        $profundidad_actual = $product->get_height();
-
-        if ($actualizar_si || !$peso_actual || !$largo_actual || !$ancho_actual || !$profundidad_actual) {
-            $log_producto .= "Actualizando el producto {$product->get_name()} ({$product_id}) de la categoría {$categoria}; ";
-
-            if (($actualizar_si || !$peso_actual) && $incoming['peso'] > 0) {
-                $product->set_weight($incoming['peso']);
-                $log_producto .= "Peso {$peso_actual} -> {$incoming['peso']}; ";
-                $modificado = true;
-            }
-            if (($actualizar_si || !$largo_actual) && $incoming['largo'] > 0) {
-                $product->set_length($incoming['largo']);
-                $log_producto .= "Largo {$largo_actual} -> {$incoming['largo']}; ";
-                $modificado = true;
-            }
-            if (($actualizar_si || !$ancho_actual) && $incoming['ancho'] > 0) {
-                $product->set_width($incoming['ancho']);
-                $log_producto .= "Ancho {$ancho_actual} -> {$incoming['ancho']}; ";
-                $modificado = true;
-            }
-            if (($actualizar_si || !$profundidad_actual) && $incoming['profundidad'] > 0) {
-                $product->set_height($incoming['profundidad']);
-                $log_producto .= "Profundidad {$profundidad_actual} -> {$incoming['profundidad']}; ";
-                $modificado = true;
-            }
-
-            if ($actualizar_si || (!$peso_actual && !$largo_actual && !$ancho_actual && !$profundidad_actual)) {
-                $actualizacion_total = true;
-            }
-
-            if ($modificado) {
-                $product->save();
-            }
-        }
-
-        return [
-            'modificado' => $modificado,
-            'actualizacion_total' => $actualizacion_total,
-            'log_producto' => $log_producto,
-            'detalles_errores' => '',
-        ];
-    }
-
-    private static function update_shipping_class($product, $tamano) {
-        $shipping_class = get_term_by('name', $tamano, 'product_shipping_class') ?: get_term_by('slug', $tamano, 'product_shipping_class');
-        if (!$shipping_class) {
-            return [
-                'modificado' => false,
-                'detalles_errores' => "Clase de envío '{$tamano}' no encontrada.",
-                'log_producto' => '',
-            ];
-        }
-
-        if ((int) $product->get_shipping_class_id() === (int) $shipping_class->term_id) {
-            return [
-                'modificado' => false,
-                'detalles_errores' => '',
-                'log_producto' => '',
-            ];
-        }
-
-        $clase_actual = $product->get_shipping_class();
-        $product->set_shipping_class_id($shipping_class->term_id);
-        $product->save();
-
-        return [
-            'modificado' => true,
-            'detalles_errores' => '',
-            'log_producto' => 'Clase de envío modificada para ' . $product->get_name() . ' (ID: ' . $product->get_id() . ') - Clase original: ' . $clase_actual . '; Nueva clase: ' . $shipping_class->name . '.',
-        ];
-    }
 }

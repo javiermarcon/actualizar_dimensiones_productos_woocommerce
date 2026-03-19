@@ -47,50 +47,7 @@ final class ADPW_Import_Queue_Manager {
             ];
         }
 
-        $job = [
-            'id' => wp_generate_uuid4(),
-            'status' => 'running',
-            'stage' => 'parse_sheet',
-            'created_at' => time(),
-            'updated_at' => time(),
-            'batch_size' => $init['batch_size'],
-            'settings' => [
-                'actualizar_si' => !empty($settings['actualizar_si']),
-                'actualizar_tam' => !empty($settings['actualizar_tam']),
-                'actualizar_cat' => !empty($settings['actualizar_cat']),
-            ],
-            'mode' => $init['mode'],
-            'uploaded_file_path' => $init['uploaded_file_path'],
-            'categories_data_file' => $init['categories_data_file'],
-            'columns' => $init['columns'],
-            'cursor_row' => $init['cursor_row'],
-            'highest_row' => $init['highest_row'],
-            'empty_row_count' => $init['empty_row_count'],
-            'processed_rows' => $init['processed_rows'],
-            'total_rows' => $init['total_rows'],
-            'category_ids' => $init['category_ids'],
-            'category_cursor' => $init['category_cursor'],
-            'product_queue' => $init['product_queue'],
-            'product_cursor' => $init['product_cursor'],
-            'results' => $init['results'],
-            'error_general' => '',
-            'debug_log' => [],
-        ];
-
-        self::append_debug($job, 'Job creado. stage=parse_sheet, total_rows=' . (int) $job['total_rows']);
-        if (!empty($init['debug_lines']) && is_array($init['debug_lines'])) {
-            foreach ($init['debug_lines'] as $line) {
-                self::append_debug($job, 'INIT ' . (string) $line);
-            }
-        }
-        if (!empty($init['warnings']) && is_array($init['warnings'])) {
-            foreach ($init['warnings'] as $warning) {
-                self::append_debug($job, 'WARNING: ' . $warning);
-                if (isset($job['results']['detalles']) && is_array($job['results']['detalles'])) {
-                    $job['results']['detalles'][] = (string) $warning;
-                }
-            }
-        }
+        $job = ADPW_Import_Job_Factory::create_job($init, $settings);
         self::save_job($job);
         self::schedule_next_batch($job['id']);
 
@@ -168,19 +125,7 @@ final class ADPW_Import_Queue_Manager {
             return;
         }
 
-        self::append_debug($job, 'Batch start stage=' . $job['stage']);
-
-        try {
-            ADPW_Excel_Import_Service::process_job_batch($job);
-        } catch (\Throwable $e) {
-            $job['status'] = 'failed';
-            $job['error_general'] = 'Excepción en batch: ' . $e->getMessage();
-            self::append_debug($job, 'ERROR ' . $job['error_general']);
-        }
-
-        $job['updated_at'] = time();
-        self::append_debug($job, 'Batch end stage=' . $job['stage'] . ' status=' . $job['status']);
-
+        $job = ADPW_Import_Batch_Runner::process($job);
         self::save_job($job);
 
         if (($job['status'] ?? '') === 'running') {

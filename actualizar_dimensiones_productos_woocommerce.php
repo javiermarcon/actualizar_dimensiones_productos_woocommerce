@@ -17,6 +17,8 @@ require_once __DIR__ . '/includes/class-adpw-admin-job-progress-ui.php';
 require_once __DIR__ . '/includes/class-adpw-ajax-handler-utils.php';
 require_once __DIR__ . '/includes/class-adpw-import-job-store.php';
 require_once __DIR__ . '/includes/class-adpw-import-job-summary.php';
+require_once __DIR__ . '/includes/class-adpw-import-job-factory.php';
+require_once __DIR__ . '/includes/class-adpw-import-batch-runner.php';
 require_once __DIR__ . '/includes/class-adpw-settings.php';
 require_once __DIR__ . '/includes/class-adpw-category-meta-repository.php';
 require_once __DIR__ . '/includes/class-adpw-category-product-queue-builder.php';

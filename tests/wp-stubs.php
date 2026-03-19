@@ -17,6 +17,7 @@ if (!class_exists('WP_Term')) {
         public string $name = '';
         public string $slug = '';
         public int $parent = 0;
+        public string $taxonomy = '';
     }
 }
 
@@ -27,6 +28,19 @@ if (!class_exists('WC_Product')) {
         private string $width = '';
         private string $height = '';
         private string $name = 'Test Product';
+        private int $id = 0;
+        private int $shipping_class_id = 0;
+        private string $shipping_class = '';
+        private int $save_count = 0;
+
+        public function __construct(int $id = 0, string $name = 'Test Product') {
+            $this->id = $id;
+            $this->name = $name;
+        }
+
+        public function get_id(): int {
+            return $this->id;
+        }
 
         public function get_weight(): string {
             return $this->weight;
@@ -48,26 +62,44 @@ if (!class_exists('WC_Product')) {
             return $this->name;
         }
 
+        public function get_shipping_class_id(): int {
+            return $this->shipping_class_id;
+        }
+
+        public function get_shipping_class(): string {
+            return $this->shipping_class;
+        }
+
         public function set_weight(float $value): void {
             $this->weight = (string) $value;
         }
 
-        public function set_length(float $value): void {
+        public function set_length($value): void {
             $this->length = (string) $value;
         }
 
-        public function set_width(float $value): void {
+        public function set_width($value): void {
             $this->width = (string) $value;
         }
 
-        public function set_height(float $value): void {
+        public function set_height($value): void {
             $this->height = (string) $value;
         }
 
         public function set_shipping_class_id(int $value): void {
+            $this->shipping_class_id = $value;
         }
 
         public function save(): void {
+            $this->save_count++;
+        }
+
+        public function get_save_count(): int {
+            return $this->save_count;
+        }
+
+        public function set_shipping_class(string $value): void {
+            $this->shipping_class = $value;
         }
     }
 }
@@ -75,10 +107,38 @@ if (!class_exists('WC_Product')) {
 if (!isset($GLOBALS['adpw_test_terms'])) {
     $GLOBALS['adpw_test_terms'] = [];
 }
+if (!isset($GLOBALS['adpw_test_options'])) {
+    $GLOBALS['adpw_test_options'] = [];
+}
+if (!isset($GLOBALS['adpw_test_term_meta'])) {
+    $GLOBALS['adpw_test_term_meta'] = [];
+}
+if (!isset($GLOBALS['adpw_test_posts'])) {
+    $GLOBALS['adpw_test_posts'] = [];
+}
+if (!isset($GLOBALS['adpw_test_post_terms'])) {
+    $GLOBALS['adpw_test_post_terms'] = [];
+}
+if (!isset($GLOBALS['adpw_test_ancestors'])) {
+    $GLOBALS['adpw_test_ancestors'] = [];
+}
+if (!isset($GLOBALS['adpw_test_products'])) {
+    $GLOBALS['adpw_test_products'] = [];
+}
+if (!isset($GLOBALS['adpw_test_scheduled_events'])) {
+    $GLOBALS['adpw_test_scheduled_events'] = [];
+}
 
 if (!function_exists('adpw_test_reset_wp_stubs')) {
     function adpw_test_reset_wp_stubs(): void {
         $GLOBALS['adpw_test_terms'] = [];
+        $GLOBALS['adpw_test_options'] = [];
+        $GLOBALS['adpw_test_term_meta'] = [];
+        $GLOBALS['adpw_test_posts'] = [];
+        $GLOBALS['adpw_test_post_terms'] = [];
+        $GLOBALS['adpw_test_ancestors'] = [];
+        $GLOBALS['adpw_test_products'] = [];
+        $GLOBALS['adpw_test_scheduled_events'] = [];
     }
 }
 
@@ -268,18 +328,20 @@ if (!function_exists('wp_json_encode')) {
 
 if (!function_exists('get_option')) {
     function get_option(string $option, $default = false) {
-        return $default;
+        return array_key_exists($option, $GLOBALS['adpw_test_options']) ? $GLOBALS['adpw_test_options'][$option] : $default;
     }
 }
 
 if (!function_exists('update_option')) {
     function update_option(string $option, $value, bool $autoload = true): bool {
+        $GLOBALS['adpw_test_options'][$option] = $value;
         return true;
     }
 }
 
 if (!function_exists('delete_option')) {
     function delete_option(string $option): bool {
+        unset($GLOBALS['adpw_test_options'][$option]);
         return true;
     }
 }
@@ -292,12 +354,23 @@ if (!function_exists('wp_parse_args')) {
 
 if (!function_exists('wp_next_scheduled')) {
     function wp_next_scheduled(string $hook, array $args = []) {
-        return false;
+        $key = $hook . '|' . md5(json_encode($args));
+        if (!isset($GLOBALS['adpw_test_scheduled_events'][$key])) {
+            return false;
+        }
+
+        return $GLOBALS['adpw_test_scheduled_events'][$key]['timestamp'];
     }
 }
 
 if (!function_exists('wp_schedule_single_event')) {
     function wp_schedule_single_event(int $timestamp, string $hook, array $args = []): bool {
+        $key = $hook . '|' . md5(json_encode($args));
+        $GLOBALS['adpw_test_scheduled_events'][$key] = [
+            'timestamp' => $timestamp,
+            'hook' => $hook,
+            'args' => $args,
+        ];
         return true;
     }
 }
@@ -315,14 +388,27 @@ if (!function_exists('is_wp_error')) {
 
 if (!function_exists('get_terms')) {
     function get_terms(array $args = []): array {
-        return array_values((array) ($GLOBALS['adpw_test_terms'] ?? []));
+        $terms = array_values((array) ($GLOBALS['adpw_test_terms'] ?? []));
+        if (!empty($args['taxonomy'])) {
+            $terms = array_values(array_filter($terms, static function ($term) use ($args) {
+                return $term instanceof WP_Term && $term->taxonomy === $args['taxonomy'];
+            }));
+        }
+
+        if (($args['fields'] ?? '') === 'slugs') {
+            return array_values(array_map(static function ($term) {
+                return (string) $term->slug;
+            }, $terms));
+        }
+
+        return $terms;
     }
 }
 
 if (!function_exists('get_term')) {
     function get_term(int $term_id, string $taxonomy = '') {
         foreach ((array) ($GLOBALS['adpw_test_terms'] ?? []) as $term) {
-            if ($term instanceof WP_Term && $term->term_id === $term_id) {
+            if ($term instanceof WP_Term && $term->term_id === $term_id && ($taxonomy === '' || $term->taxonomy === $taxonomy)) {
                 return $term;
             }
         }
@@ -334,7 +420,7 @@ if (!function_exists('get_term')) {
 if (!function_exists('get_term_by')) {
     function get_term_by(string $field, string $value, string $taxonomy = '') {
         foreach ((array) ($GLOBALS['adpw_test_terms'] ?? []) as $term) {
-            if (!$term instanceof WP_Term) {
+            if (!$term instanceof WP_Term || ($taxonomy !== '' && $term->taxonomy !== $taxonomy)) {
                 continue;
             }
 
@@ -353,42 +439,47 @@ if (!function_exists('get_term_by')) {
 
 if (!function_exists('get_term_meta')) {
     function get_term_meta(int $term_id, string $key, bool $single = false): string {
-        return '';
+        return (string) ($GLOBALS['adpw_test_term_meta'][$term_id][$key] ?? '');
     }
 }
 
 if (!function_exists('update_term_meta')) {
     function update_term_meta(int $term_id, string $key, $value): bool {
+        if (!isset($GLOBALS['adpw_test_term_meta'][$term_id])) {
+            $GLOBALS['adpw_test_term_meta'][$term_id] = [];
+        }
+        $GLOBALS['adpw_test_term_meta'][$term_id][$key] = (string) $value;
         return true;
     }
 }
 
 if (!function_exists('delete_term_meta')) {
     function delete_term_meta(int $term_id, string $key): bool {
+        unset($GLOBALS['adpw_test_term_meta'][$term_id][$key]);
         return true;
     }
 }
 
 if (!function_exists('get_posts')) {
     function get_posts(array $args = []): array {
-        return [];
+        return array_values((array) ($GLOBALS['adpw_test_posts'] ?? []));
     }
 }
 
 if (!function_exists('wp_get_post_terms')) {
     function wp_get_post_terms(int $post_id, string $taxonomy, array $args = []) {
-        return [];
+        return array_values((array) ($GLOBALS['adpw_test_post_terms'][$post_id] ?? []));
     }
 }
 
 if (!function_exists('get_ancestors')) {
     function get_ancestors(int $object_id, string $object_type = '', string $resource_type = ''): array {
-        return [];
+        return array_values((array) ($GLOBALS['adpw_test_ancestors'][$object_id] ?? []));
     }
 }
 
 if (!function_exists('wc_get_product')) {
     function wc_get_product(int $product_id): ?WC_Product {
-        return null;
+        return $GLOBALS['adpw_test_products'][$product_id] ?? null;
     }
 }

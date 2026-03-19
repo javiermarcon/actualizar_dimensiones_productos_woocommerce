@@ -117,6 +117,9 @@ final class ADPW_Import_Queue_Manager {
             }
             wp_send_json_success($start);
         } catch (\Throwable $e) {
+            if (class_exists('ADPW_Test_Json_Response_Exception') && $e instanceof ADPW_Test_Json_Response_Exception) {
+                throw $e;
+            }
             wp_send_json_error([
                 'error_general' => 'Excepción en start_import: ' . $e->getMessage(),
             ]);
@@ -148,6 +151,9 @@ final class ADPW_Import_Queue_Manager {
 
             wp_send_json_success(self::build_summary($job));
         } catch (\Throwable $e) {
+            if (class_exists('ADPW_Test_Json_Response_Exception') && $e instanceof ADPW_Test_Json_Response_Exception) {
+                throw $e;
+            }
             wp_send_json_error([
                 'error_general' => 'Excepción en import_status: ' . $e->getMessage(),
             ]);
@@ -167,6 +173,9 @@ final class ADPW_Import_Queue_Manager {
             }
             wp_send_json_success($summary);
         } catch (\Throwable $e) {
+            if (class_exists('ADPW_Test_Json_Response_Exception') && $e instanceof ADPW_Test_Json_Response_Exception) {
+                throw $e;
+            }
             wp_send_json_error([
                 'error_general' => 'Excepción en run_batch: ' . $e->getMessage(),
             ]);
@@ -201,52 +210,22 @@ final class ADPW_Import_Queue_Manager {
     }
 
     private static function build_summary($job) {
-        $stage = (string) ($job['stage'] ?? 'unknown');
-        $status = (string) ($job['status'] ?? 'unknown');
-
-        if ($stage === 'parse_sheet') {
-            $total = max(1, (int) ($job['total_rows'] ?? 1));
-            $processed = min($total, (int) ($job['processed_rows'] ?? 0));
-            $progress = (int) floor(($processed / $total) * 33);
-            $label = 'Leyendo planilla y generando temporal';
-        } elseif ($stage === 'save_category_meta') {
-            $total = max(1, count((array) ($job['category_ids'] ?? [])));
-            $processed = min($total, (int) ($job['category_cursor'] ?? 0));
-            $progress = 33 + (int) floor(($processed / $total) * 33);
-            $label = 'Guardando metadata de categorías';
-        } else {
-            $total = max(1, count((array) ($job['product_queue'] ?? [])));
-            $processed = min($total, (int) ($job['product_cursor'] ?? 0));
-            $progress = 66 + (int) floor(($processed / $total) * 34);
-            $label = 'Actualizando productos';
-        }
-
-        $summary = ADPW_Background_Job_Utils::build_summary($job, $label, $processed, $total);
-
-        if ($status === 'completed') {
-            $summary['progress'] = 100;
-        } elseif ($status === 'running') {
-            $summary['progress'] = max(1, min(100, $progress));
-        } else {
-            $summary['progress'] = max(0, min(100, $progress));
-        }
-
-        return $summary;
+        return ADPW_Import_Job_Summary::build_summary($job);
     }
 
     private static function append_debug(&$job, $message) {
-        ADPW_Background_Job_Utils::append_debug($job, $message);
+        ADPW_Import_Job_Store::append_debug($job, $message);
     }
 
     private static function get_job() {
-        return ADPW_Background_Job_Utils::get_job(self::OPTION_JOB);
+        return ADPW_Import_Job_Store::get_job(self::OPTION_JOB);
     }
 
     private static function save_job($job) {
-        ADPW_Background_Job_Utils::save_job(self::OPTION_JOB, $job);
+        ADPW_Import_Job_Store::save_job(self::OPTION_JOB, $job);
     }
 
     private static function schedule_next_batch($job_id) {
-        ADPW_Background_Job_Utils::schedule_next_batch(self::CRON_HOOK, $job_id);
+        ADPW_Import_Job_Store::schedule_next_batch(self::CRON_HOOK, $job_id);
     }
 }

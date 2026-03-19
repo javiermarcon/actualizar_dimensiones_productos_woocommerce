@@ -196,16 +196,16 @@ final class ADPWCategoryMetadataManagerTest extends TestCase {
         $shippingCache = ['premium' => 44];
         $messages = ['uno'];
 
-        $sameWeight = $this->invokePrivateStaticMethod(ADPW_Category_Metadata_Manager::class, 'set_product_numeric_if_needed', [
+        $sameWeight = $this->invokePrivateStaticMethod(ADPW_Category_Product_Metadata_Applier::class, 'set_product_numeric_if_needed', [
             $product,
             'weight',
             '1.5',
         ]);
-        $resolved = $this->invokePrivateStaticMethod(ADPW_Category_Metadata_Manager::class, 'resolve_shipping_class_id', [
+        $resolved = $this->invokePrivateStaticMethod(ADPW_Category_Product_Metadata_Applier::class, 'resolve_shipping_class_id', [
             'premium',
             &$shippingCache,
         ]);
-        $this->invokePrivateStaticMethod(ADPW_Category_Metadata_Manager::class, 'append_limited', [
+        $this->invokePrivateStaticMethod(ADPW_Category_Product_Metadata_Applier::class, 'append_limited', [
             &$messages,
             'dos',
             1,

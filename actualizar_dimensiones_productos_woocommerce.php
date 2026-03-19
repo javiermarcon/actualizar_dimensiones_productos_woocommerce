@@ -14,7 +14,12 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 require_once __DIR__ . '/includes/class-adpw-background-job-utils.php';
 require_once __DIR__ . '/includes/class-adpw-admin-job-progress-ui.php';
+require_once __DIR__ . '/includes/class-adpw-import-job-store.php';
+require_once __DIR__ . '/includes/class-adpw-import-job-summary.php';
 require_once __DIR__ . '/includes/class-adpw-settings.php';
+require_once __DIR__ . '/includes/class-adpw-category-meta-repository.php';
+require_once __DIR__ . '/includes/class-adpw-category-product-queue-builder.php';
+require_once __DIR__ . '/includes/class-adpw-category-product-metadata-applier.php';
 require_once __DIR__ . '/includes/class-adpw-category-metadata-manager.php';
 require_once __DIR__ . '/includes/class-adpw-category-metadata-save-service.php';
 require_once __DIR__ . '/includes/class-adpw-category-update-queue-manager.php';

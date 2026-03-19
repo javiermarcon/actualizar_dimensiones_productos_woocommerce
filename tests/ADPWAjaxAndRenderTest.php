@@ -30,8 +30,8 @@ final class ADPWAjaxAndRenderTest extends TestCase {
             ADPW_Import_Queue_Manager::ajax_import_status();
             self::fail('Expected JSON response exception.');
         } catch (ADPW_Test_Json_Response_Exception $e) {
-            self::assertFalse($e->success);
-            self::assertSame('Excepción en import_status: JSON response captured', $e->payload['error_general']);
+            self::assertTrue($e->success);
+            self::assertSame('idle', $e->payload['status']);
         }
     }
 
@@ -41,7 +41,7 @@ final class ADPWAjaxAndRenderTest extends TestCase {
             self::fail('Expected JSON response exception.');
         } catch (ADPW_Test_Json_Response_Exception $e) {
             self::assertFalse($e->success);
-            self::assertSame('Excepción en run_batch: JSON response captured', $e->payload['error_general']);
+            self::assertSame('No hay job en ejecución para procesar.', $e->payload['error_general']);
         }
     }
 
@@ -53,7 +53,7 @@ final class ADPWAjaxAndRenderTest extends TestCase {
             self::fail('Expected JSON response exception.');
         } catch (ADPW_Test_Json_Response_Exception $e) {
             self::assertFalse($e->success);
-            self::assertSame('Excepción en start_import: JSON response captured', $e->payload['error_general']);
+            self::assertSame('No tenés permisos para iniciar la importación.', $e->payload['message']);
         }
     }
 
@@ -62,8 +62,8 @@ final class ADPWAjaxAndRenderTest extends TestCase {
             ADPW_Category_Update_Queue_Manager::ajax_status();
             self::fail('Expected JSON response exception.');
         } catch (ADPW_Test_Json_Response_Exception $e) {
-            self::assertFalse($e->success);
-            self::assertSame('Excepción en category_update_status: JSON response captured', $e->payload['error_general']);
+            self::assertTrue($e->success);
+            self::assertSame('idle', $e->payload['status']);
         }
     }
 
@@ -73,7 +73,7 @@ final class ADPWAjaxAndRenderTest extends TestCase {
             self::fail('Expected JSON response exception.');
         } catch (ADPW_Test_Json_Response_Exception $e) {
             self::assertFalse($e->success);
-            self::assertSame('Excepción en category_update_run_batch: JSON response captured', $e->payload['error_general']);
+            self::assertSame('No hay job del árbol en ejecución para procesar.', $e->payload['error_general']);
         }
     }
 
@@ -108,5 +108,145 @@ final class ADPWAjaxAndRenderTest extends TestCase {
 
         self::assertStringContainsString('Árbol de categorías', $html);
         self::assertStringContainsString('No hay categorías de producto para mostrar.', $html);
+    }
+
+    public function testImportAjaxStatusReturnsRunningSummaryAndTriggersCron(): void {
+        update_option('adpw_import_job', [
+            'id' => 'job-import',
+            'status' => 'running',
+            'stage' => 'parse_sheet',
+            'processed_rows' => 1,
+            'total_rows' => 10,
+            'results' => [
+                'totales' => 0,
+                'parciales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+            'updated_at' => 10,
+        ]);
+
+        try {
+            ADPW_Import_Queue_Manager::ajax_import_status();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertTrue($e->success);
+            self::assertSame('running', $e->payload['status']);
+            self::assertSame('parse_sheet', $e->payload['stage']);
+            self::assertNotEmpty($GLOBALS['adpw_test_spawn_cron_calls']);
+        }
+    }
+
+    public function testImportAjaxRunBatchReturnsSuccessfulSummary(): void {
+        $shippingTerm = new WP_Term();
+        $shippingTerm->term_id = 11;
+        $shippingTerm->slug = 'premium';
+        $shippingTerm->name = 'Premium';
+        $shippingTerm->taxonomy = 'product_shipping_class';
+        $GLOBALS['adpw_test_terms'] = [$shippingTerm];
+
+        $categoriesFile = tempnam(sys_get_temp_dir(), 'adpw-cat-');
+        file_put_contents($categoriesFile, json_encode([
+            '7' => [
+                'tamano' => 'premium',
+                'peso' => '1',
+                'ancho' => '2',
+                'largo' => '3',
+                'profundidad' => '4',
+            ],
+        ]));
+
+        update_option('adpw_import_job', [
+            'id' => 'job-import',
+            'status' => 'running',
+            'stage' => 'save_category_meta',
+            'batch_size' => 10,
+            'category_cursor' => 0,
+            'category_ids' => [7],
+            'categories_data_file' => $categoriesFile,
+            'results' => [
+                'totales' => 0,
+                'parciales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+            'debug_log' => [],
+        ]);
+
+        try {
+            ADPW_Import_Queue_Manager::ajax_run_batch();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertTrue($e->success);
+            self::assertSame('running', $e->payload['status']);
+            self::assertSame('update_products', $e->payload['stage']);
+        }
+
+        @unlink($categoriesFile);
+    }
+
+    public function testCategoryUpdateAjaxStatusReturnsRunningSummary(): void {
+        update_option('adpw_category_update_job', [
+            'id' => 'job-tree',
+            'status' => 'running',
+            'stage' => 'update_products',
+            'product_queue' => [1, 2],
+            'product_cursor' => 1,
+            'results' => [
+                'totales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+            'updated_at' => 10,
+        ]);
+
+        try {
+            ADPW_Category_Update_Queue_Manager::ajax_status();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertTrue($e->success);
+            self::assertSame('running', $e->payload['status']);
+            self::assertSame('update_products', $e->payload['stage']);
+        }
+    }
+
+    public function testCategoryUpdateAjaxRunBatchReturnsSuccessfulSummary(): void {
+        $product = new WC_Product(901, 'Mochila');
+        $GLOBALS['adpw_test_products'][901] = $product;
+        $GLOBALS['adpw_test_term_meta'][7] = [
+            ADPW_Category_Metadata_Manager::META_HEIGHT => '4.5',
+        ];
+
+        update_option('adpw_category_update_job', [
+            'id' => 'job-tree',
+            'status' => 'running',
+            'stage' => 'update_products',
+            'batch_size' => 10,
+            'product_cursor' => 0,
+            'product_queue' => [[
+                'product_id' => 901,
+                'category_id' => 7,
+            ]],
+            'runtime' => [],
+            'results' => [
+                'totales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+            'debug_log' => [],
+        ]);
+
+        try {
+            ADPW_Category_Update_Queue_Manager::ajax_run_batch();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertTrue($e->success);
+            self::assertSame('completed', $e->payload['status']);
+            self::assertSame(100, $e->payload['progress']);
+        }
     }
 }

@@ -111,6 +111,9 @@ final class ADPW_Category_Update_Queue_Manager {
 
             wp_send_json_success(self::build_summary($job));
         } catch (\Throwable $e) {
+            if (class_exists('ADPW_Test_Json_Response_Exception') && $e instanceof ADPW_Test_Json_Response_Exception) {
+                throw $e;
+            }
             wp_send_json_error([
                 'error_general' => 'Excepción en category_update_status: ' . $e->getMessage(),
             ]);
@@ -130,6 +133,9 @@ final class ADPW_Category_Update_Queue_Manager {
             }
             wp_send_json_success($summary);
         } catch (\Throwable $e) {
+            if (class_exists('ADPW_Test_Json_Response_Exception') && $e instanceof ADPW_Test_Json_Response_Exception) {
+                throw $e;
+            }
             wp_send_json_error([
                 'error_general' => 'Excepción en category_update_run_batch: ' . $e->getMessage(),
             ]);

@@ -7,18 +7,23 @@ if (!defined('ABSPATH')) {
 }
 
 final class ADPW_Excel_Import_Service {
+    private static $uploaded_file_validator = null;
+    private static $uploaded_file_mover = null;
+    private static $upload_dir_provider = null;
+    private static $mkdir_p_callback = null;
+
     public static function initialize_job($file, $settings, $batch_size) {
-        if (empty($file['tmp_name']) || !is_uploaded_file($file['tmp_name'])) {
+        if (empty($file['tmp_name']) || !self::is_valid_uploaded_file((string) $file['tmp_name'])) {
             return ['error_general' => 'No se seleccionó ningún archivo válido.'];
         }
 
-        $upload = wp_upload_dir();
+        $upload = self::get_upload_dir();
         if (!empty($upload['error'])) {
             return ['error_general' => 'No se pudo acceder al directorio de uploads.'];
         }
 
         $target_dir = trailingslashit($upload['basedir']) . 'adpw-imports';
-        if (!wp_mkdir_p($target_dir)) {
+        if (!self::create_directory($target_dir)) {
             return ['error_general' => 'No se pudo crear el directorio temporal de importación.'];
         }
 
@@ -28,7 +33,7 @@ final class ADPW_Excel_Import_Service {
         }
 
         $uploaded_file_path = trailingslashit($target_dir) . 'adpw-upload-' . wp_generate_uuid4() . '.' . $ext;
-        if (!move_uploaded_file($file['tmp_name'], $uploaded_file_path)) {
+        if (!self::move_uploaded_file_to_target((string) $file['tmp_name'], $uploaded_file_path)) {
             return ['error_general' => 'No se pudo mover el archivo subido.'];
         }
 
@@ -365,6 +370,39 @@ final class ADPW_Excel_Import_Service {
             $reader->setReadDataOnly(true);
         }
         return $reader->load($path);
+    }
+
+    private static function is_valid_uploaded_file($path) {
+        if (is_callable(self::$uploaded_file_validator)) {
+            return (bool) call_user_func(self::$uploaded_file_validator, $path);
+        }
+
+        return is_uploaded_file($path);
+    }
+
+    private static function move_uploaded_file_to_target($source, $destination) {
+        if (is_callable(self::$uploaded_file_mover)) {
+            return (bool) call_user_func(self::$uploaded_file_mover, $source, $destination);
+        }
+
+        return move_uploaded_file($source, $destination);
+    }
+
+    private static function get_upload_dir() {
+        if (is_callable(self::$upload_dir_provider)) {
+            $upload = call_user_func(self::$upload_dir_provider);
+            return is_array($upload) ? $upload : [];
+        }
+
+        return wp_upload_dir();
+    }
+
+    private static function create_directory($target_dir) {
+        if (is_callable(self::$mkdir_p_callback)) {
+            return (bool) call_user_func(self::$mkdir_p_callback, $target_dir);
+        }
+
+        return wp_mkdir_p($target_dir);
     }
 
 }

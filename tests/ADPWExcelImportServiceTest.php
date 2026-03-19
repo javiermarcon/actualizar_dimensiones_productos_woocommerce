@@ -10,6 +10,10 @@ use PHPUnit\Framework\TestCase;
 final class ADPWExcelImportServiceTest extends TestCase {
     protected function tearDown(): void {
         $this->setPrivateStaticProperty(ADPW_Excel_Import_Support::class, 'product_category_lookup', null);
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_validator', null);
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_mover', null);
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'upload_dir_provider', null);
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'mkdir_p_callback', null);
         adpw_test_reset_wp_stubs();
     }
 
@@ -49,6 +53,15 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertSame(5, $columns['peso']);
         self::assertSame(6, $columns['idcat']);
         self::assertSame(7, $columns['tamano']);
+    }
+
+    public function testFindHeaderIndexReturnsFalseWhenNoCandidateMatches(): void {
+        $index = ADPW_Excel_Import_Support::find_header_index([
+            1 => 'sku',
+            2 => 'descripcion',
+        ], ['categoria', 'tamaño']);
+
+        self::assertFalse($index);
     }
 
     public function testGetHeadersNormalizesSpreadsheetHeaderRow(): void {
@@ -105,6 +118,22 @@ final class ADPWExcelImportServiceTest extends TestCase {
         $ids = ADPW_Excel_Import_Support::find_category_ids_by_name('Baules');
 
         self::assertSame([], $ids);
+    }
+
+    public function testSupportPrivateHelpersNormalizeAndBuildLookup(): void {
+        $term = new WP_Term();
+        $term->term_id = 20;
+        $term->name = 'Baúles Grandes';
+        $term->slug = 'baules-grandes';
+        $term->taxonomy = 'product_cat';
+        $GLOBALS['adpw_test_terms'] = [$term];
+
+        $normalized = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Support::class, 'normalize_category_name', [' Baúles Grandes ']);
+        $lookup = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Support::class, 'get_product_category_lookup');
+
+        self::assertSame('baules grandes', $normalized);
+        self::assertSame([20], $lookup['exact']['baules grandes']);
+        self::assertSame(20, $lookup['entries'][0]['term_id']);
     }
 
     public function testValidateHeadersReturnsWarningWhenSizeColumnIsMissing(): void {
@@ -380,6 +409,177 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertSame('premium', $entry['tamano']);
     }
 
+    public function testInitializeJobBuildsJobDataForValidSpreadsheet(): void {
+        $sourceFile = $this->createSpreadsheetFile([
+            ['Categoria', 'Peso (kg)', 'Tamaño'],
+            ['Baules', 10, 'premium'],
+        ]);
+        $targetRoot = sys_get_temp_dir() . '/adpw-tests-' . uniqid('', true);
+        mkdir($targetRoot);
+
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_validator', static function ($path): bool {
+            return is_string($path) && $path !== '';
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_mover', static function ($source, $destination): bool {
+            return copy((string) $source, (string) $destination);
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'upload_dir_provider', static function () use ($targetRoot): array {
+            return [
+                'basedir' => $targetRoot,
+                'error' => '',
+            ];
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'mkdir_p_callback', static function ($target): bool {
+            return is_dir((string) $target) || mkdir((string) $target, 0777, true);
+        });
+
+        $job = ADPW_Excel_Import_Service::initialize_job([
+            'tmp_name' => $sourceFile,
+            'name' => 'import.xlsx',
+        ], [
+            'actualizar_tam' => 1,
+            'actualizar_cat' => 0,
+        ], 7);
+
+        self::assertSame(7, $job['batch_size']);
+        self::assertSame(2, $job['highest_row']);
+        self::assertSame(1, $job['total_rows']);
+        self::assertSame(1, $job['columns']['categoria']);
+        self::assertTrue($job['mode']['actualizar_tam_dimensiones']);
+        self::assertFileExists($job['uploaded_file_path']);
+        self::assertFileExists($job['categories_data_file']);
+
+        @unlink($job['uploaded_file_path']);
+        @unlink($job['categories_data_file']);
+        @unlink($sourceFile);
+        @rmdir($targetRoot . '/adpw-imports');
+        @rmdir($targetRoot);
+    }
+
+    public function testInitializeJobReturnsUploadDirectoryError(): void {
+        $sourceFile = $this->createSpreadsheetFile([
+            ['Categoria'],
+            ['Baules'],
+        ]);
+
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_validator', static function (): bool {
+            return true;
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'upload_dir_provider', static function (): array {
+            return [
+                'basedir' => sys_get_temp_dir(),
+                'error' => 'fallo',
+            ];
+        });
+
+        $result = ADPW_Excel_Import_Service::initialize_job([
+            'tmp_name' => $sourceFile,
+            'name' => 'import.xlsx',
+        ], [], 5);
+
+        self::assertSame('No se pudo acceder al directorio de uploads.', $result['error_general']);
+        @unlink($sourceFile);
+    }
+
+    public function testInitializeJobReturnsDirectoryCreationError(): void {
+        $sourceFile = $this->createSpreadsheetFile([
+            ['Categoria'],
+            ['Baules'],
+        ]);
+
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_validator', static function (): bool {
+            return true;
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'upload_dir_provider', static function (): array {
+            return [
+                'basedir' => sys_get_temp_dir(),
+                'error' => '',
+            ];
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'mkdir_p_callback', static function (): bool {
+            return false;
+        });
+
+        $result = ADPW_Excel_Import_Service::initialize_job([
+            'tmp_name' => $sourceFile,
+            'name' => 'import.xlsx',
+        ], [], 5);
+
+        self::assertSame('No se pudo crear el directorio temporal de importación.', $result['error_general']);
+        @unlink($sourceFile);
+    }
+
+    public function testInitializeJobReturnsMoveErrorWhenFileCannotBeMoved(): void {
+        $sourceFile = $this->createSpreadsheetFile([
+            ['Categoria'],
+            ['Baules'],
+        ]);
+
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_validator', static function (): bool {
+            return true;
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_mover', static function (): bool {
+            return false;
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'upload_dir_provider', static function (): array {
+            return [
+                'basedir' => sys_get_temp_dir(),
+                'error' => '',
+            ];
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'mkdir_p_callback', static function (): bool {
+            return true;
+        });
+
+        $result = ADPW_Excel_Import_Service::initialize_job([
+            'tmp_name' => $sourceFile,
+            'name' => 'import.xlsx',
+        ], [], 5);
+
+        self::assertSame('No se pudo mover el archivo subido.', $result['error_general']);
+        @unlink($sourceFile);
+    }
+
+    public function testInitializeJobReturnsValidationErrorAndDebugLines(): void {
+        $sourceFile = $this->createSpreadsheetFile([
+            ['SKU'],
+            ['ABC123'],
+        ]);
+        $targetRoot = sys_get_temp_dir() . '/adpw-tests-' . uniqid('', true);
+        mkdir($targetRoot);
+
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_validator', static function (): bool {
+            return true;
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_mover', static function ($source, $destination): bool {
+            return copy((string) $source, (string) $destination);
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'upload_dir_provider', static function () use ($targetRoot): array {
+            return [
+                'basedir' => $targetRoot,
+                'error' => '',
+            ];
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'mkdir_p_callback', static function ($target): bool {
+            return is_dir((string) $target) || mkdir((string) $target, 0777, true);
+        });
+
+        $result = ADPW_Excel_Import_Service::initialize_job([
+            'tmp_name' => $sourceFile,
+            'name' => 'import.xlsx',
+        ], [
+            'actualizar_tam' => 1,
+            'actualizar_cat' => 0,
+        ], 5);
+
+        self::assertSame('No se encontraron los encabezados esperados en el archivo Excel.', $result['error_general']);
+        self::assertNotEmpty($result['debug_lines']);
+
+        @unlink($sourceFile);
+        @rmdir($targetRoot . '/adpw-imports');
+        @rmdir($targetRoot);
+    }
+
     public function testIsEmptyEntryRecognizesEmptyAndNonEmptyRows(): void {
         $empty = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'is_empty_entry', [[
             'categoria' => '',
@@ -652,6 +852,33 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertFileDoesNotExist($categoriesFile);
         self::assertFileDoesNotExist($uploadedFile);
         self::assertSame(0, $job['results']['totales']);
+    }
+
+    public function testCleanupJobFilesRemovesExistingTemporaryFiles(): void {
+        $categoriesFile = tempnam(sys_get_temp_dir(), 'adpw-cat-');
+        $uploadedFile = tempnam(sys_get_temp_dir(), 'adpw-xlsx-');
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'cleanup_job_files', [[
+            'uploaded_file_path' => $uploadedFile,
+            'categories_data_file' => $categoriesFile,
+        ]]);
+
+        self::assertFileDoesNotExist($uploadedFile);
+        self::assertFileDoesNotExist($categoriesFile);
+    }
+
+    public function testLoadSpreadsheetReturnsSpreadsheetInstanceForValidFile(): void {
+        $uploadedFile = $this->createSpreadsheetFile([
+            ['Categoria', 'Peso'],
+            ['Baules', 10],
+        ]);
+
+        $spreadsheet = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'load_spreadsheet', [$uploadedFile]);
+
+        self::assertSame('Categoria', $spreadsheet->getActiveSheet()->getCell('A1')->getFormattedValue());
+        self::assertSame('Baules', $spreadsheet->getActiveSheet()->getCell('A2')->getFormattedValue());
+
+        @unlink($uploadedFile);
     }
 
     public function testLoadJsonFileReturnsEmptyArrayForInvalidJson(): void {

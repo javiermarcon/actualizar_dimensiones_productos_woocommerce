@@ -366,6 +366,41 @@ final class ADPWQueueManagersTest extends TestCase {
         self::assertSame('No hay job del árbol en ejecución para procesar.', $result['error_general']);
     }
 
+    public function testCategoryUpdatePrivateSaveAndGetJobDelegateToOptions(): void {
+        $job = [
+            'id' => 'job-tree-private',
+            'status' => 'running',
+        ];
+
+        $this->invokePrivateStaticMethod(ADPW_Category_Update_Queue_Manager::class, 'save_job', [$job]);
+        $saved = $this->invokePrivateStaticMethod(ADPW_Category_Update_Queue_Manager::class, 'get_job');
+
+        self::assertSame($job, $saved);
+    }
+
+    public function testCategoryUpdatePrivateScheduleNextBatchRegistersCronEvent(): void {
+        $this->invokePrivateStaticMethod(ADPW_Category_Update_Queue_Manager::class, 'schedule_next_batch', ['job-tree-private']);
+
+        self::assertCount(1, $GLOBALS['adpw_test_scheduled_events']);
+        $event = array_values($GLOBALS['adpw_test_scheduled_events'])[0];
+        self::assertSame('adpw_process_category_update_batch', $event['hook']);
+        self::assertSame(['job-tree-private'], $event['args']);
+    }
+
+    public function testCategoryUpdatePrivateBuildSummaryReflectsQueueProgress(): void {
+        $summary = $this->invokePrivateStaticMethod(ADPW_Category_Update_Queue_Manager::class, 'build_summary', [[
+            'status' => 'running',
+            'stage' => 'update_products',
+            'product_queue' => [1, 2, 3],
+            'product_cursor' => 1,
+            'updated_at' => 10,
+            'results' => null,
+        ]]);
+
+        self::assertSame('Actualizando productos desde árbol de categorías', $summary['stage_label']);
+        self::assertSame(33, $summary['progress']);
+    }
+
     public function testCategoryUpdateRegisterHooksRegistersAjaxAndCronCallbacks(): void {
         ADPW_Category_Update_Queue_Manager::register_hooks();
 

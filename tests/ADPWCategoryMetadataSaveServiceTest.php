@@ -76,4 +76,25 @@ final class ADPWCategoryMetadataSaveServiceTest extends TestCase {
         self::assertArrayNotHasKey('detalle_productos', $result);
         self::assertArrayNotHasKey('adpw_category_update_job', $GLOBALS['adpw_test_options']);
     }
+
+    public function testSaveFromRequestReportsWhenNoProductsAreAffected(): void {
+        $shippingTerm = new WP_Term();
+        $shippingTerm->term_id = 90;
+        $shippingTerm->slug = 'premium';
+        $shippingTerm->name = 'Premium';
+        $shippingTerm->taxonomy = 'product_shipping_class';
+        $GLOBALS['adpw_test_terms'] = [$shippingTerm];
+
+        $result = ADPW_Category_Metadata_Save_Service::save_from_request([
+            12 => [
+                'clase_envio' => 'premium',
+            ],
+        ], [
+            'actualizar_productos_desde_categorias' => 1,
+            'categorias_por_lote' => 5,
+        ]);
+
+        self::assertSame('Se actualizaron 1 categorías.', $result['mensaje']);
+        self::assertSame('No hay productos afectados para actualizar.', $result['detalle_productos']);
+    }
 }

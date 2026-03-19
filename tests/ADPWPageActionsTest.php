@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 final class ADPWPageActionsTest extends TestCase {
     private array $originalPost = [];
@@ -93,6 +96,88 @@ final class ADPWPageActionsTest extends TestCase {
         @unlink($categoriesFile);
     }
 
+    public function testExcelImportPageActionsIncludeDebugLinesWhenStartFails(): void {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_POST = [
+            'adpw_start_import_form_nonce' => 'nonce',
+        ];
+        $_FILES = [
+            'archivo_excel' => [],
+        ];
+
+        $result = ADPW_Excel_Import_Page_Actions::handle_requests(
+            [],
+            'adpw_start_import_form',
+            'adpw_start_import_form_nonce',
+            'adpw_manual_batch',
+            'adpw_manual_batch_nonce'
+        );
+
+        self::assertSame('No se seleccionó ningún archivo válido.', $result['start_error']);
+        self::assertSame([], $result['start_error_details']);
+    }
+
+    public function testExcelImportPageActionsStartSuccessfulImport(): void {
+        $uploadedFile = $this->createSpreadsheetFile([
+            ['Categoria', 'Tamano', 'Peso', 'Ancho', 'Largo', 'Profundidad'],
+            ['Cascos', 'premium', '1', '2', '3', '4'],
+        ]);
+
+        $serviceReflection = new ReflectionClass(ADPW_Excel_Import_Service::class);
+        $validator = $serviceReflection->getProperty('uploaded_file_validator');
+        $validator->setAccessible(true);
+        $validator->setValue(null, static fn (): bool => true);
+
+        $mover = $serviceReflection->getProperty('uploaded_file_mover');
+        $mover->setAccessible(true);
+        $mover->setValue(null, static function (string $from, string $to): bool {
+            return copy($from, $to);
+        });
+
+        $uploadDirProvider = $serviceReflection->getProperty('upload_dir_provider');
+        $uploadDirProvider->setAccessible(true);
+        $uploadDirProvider->setValue(null, static function (): array {
+            return [
+                'basedir' => sys_get_temp_dir(),
+                'baseurl' => 'http://example.test/uploads',
+            ];
+        });
+
+        $mkdirProvider = $serviceReflection->getProperty('mkdir_p_callback');
+        $mkdirProvider->setAccessible(true);
+        $mkdirProvider->setValue(null, static fn (string $path): bool => is_dir($path) || mkdir($path, 0777, true));
+
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_POST = [
+            'adpw_start_import_form_nonce' => 'nonce',
+        ];
+        $_FILES = [
+            'archivo_excel' => [
+                'name' => 'import.xlsx',
+                'tmp_name' => $uploadedFile,
+                'size' => filesize($uploadedFile),
+                'error' => 0,
+            ],
+        ];
+
+        $result = ADPW_Excel_Import_Page_Actions::handle_requests(
+            ['categorias_por_lote' => 5],
+            'adpw_start_import_form',
+            'adpw_start_import_form_nonce',
+            'adpw_manual_batch',
+            'adpw_manual_batch_nonce'
+        );
+
+        self::assertStringContainsString('Importación iniciada en segundo plano. Job ID:', $result['start_message']);
+        self::assertSame('', $result['start_error']);
+
+        $validator->setValue(null, null);
+        $mover->setValue(null, null);
+        $uploadDirProvider->setValue(null, null);
+        $mkdirProvider->setValue(null, null);
+        @unlink($uploadedFile);
+    }
+
     public function testCategoryMetadataPageActionsReturnManualBatchErrorWhenJobCannotRun(): void {
         $_POST = [
             'adpw_run_category_tree_batch' => '1',
@@ -131,5 +216,36 @@ final class ADPWPageActionsTest extends TestCase {
         );
 
         self::assertSame('Se actualizaron 1 categorías.', $result['mensaje']);
+    }
+
+    public function testCategoryMetadataPageActionsReturnNoChangesWhenMetadataPayloadIsMissing(): void {
+        $_POST = [
+            'guardar_metadata_por_categoria_nonce' => 'nonce',
+        ];
+
+        $result = ADPW_Category_Metadata_Page_Actions::handle_save_request(
+            'guardar_metadata_por_categoria_action',
+            'guardar_metadata_por_categoria_nonce',
+            'metadata_categoria'
+        );
+
+        self::assertSame('No hubo cambios para guardar.', $result['mensaje']);
+    }
+
+    private function createSpreadsheetFile(array $rows): string {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+
+        foreach ($rows as $rowIndex => $row) {
+            foreach ($row as $columnIndex => $value) {
+                $sheet->setCellValue(Coordinate::stringFromColumnIndex($columnIndex + 1) . (string) ($rowIndex + 1), $value);
+            }
+        }
+
+        $file = tempnam(sys_get_temp_dir(), 'adpw-xlsx-');
+        $writer = new Xlsx($spreadsheet);
+        $writer->save($file);
+
+        return $file;
     }
 }

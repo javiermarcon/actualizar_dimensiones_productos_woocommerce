@@ -27,28 +27,7 @@ final class ADPW_Category_Update_Queue_Manager {
         }
 
         $queue = ADPW_Category_Metadata_Manager::build_product_queue_for_categories($category_ids);
-        $job = [
-            'id' => wp_generate_uuid4(),
-            'status' => empty($queue) ? 'completed' : 'running',
-            'stage' => 'update_products',
-            'created_at' => time(),
-            'updated_at' => time(),
-            'batch_size' => max(1, (int) $batch_size),
-            'category_ids' => $category_ids,
-            'product_queue' => $queue,
-            'product_cursor' => 0,
-            'results' => [
-                'totales' => 0,
-                'errores' => 0,
-                'detalles' => [],
-                'productos_modificados' => [],
-            ],
-            'runtime' => [],
-            'error_general' => '',
-            'debug_log' => [],
-        ];
-
-        ADPW_Category_Update_Job_Store::append_debug($job, 'Job árbol creado. products=' . count($queue));
+        $job = ADPW_Category_Update_Job_Factory::create_job($category_ids, $batch_size, $queue);
         self::save_job($job);
         if (($job['status'] ?? '') === 'running') {
             self::schedule_next_batch($job['id']);
@@ -132,19 +111,7 @@ final class ADPW_Category_Update_Queue_Manager {
             return;
         }
 
-        ADPW_Category_Update_Job_Store::append_debug($job, 'Batch árbol start stage=' . $job['stage']);
-
-        try {
-            ADPW_Category_Metadata_Manager::process_product_queue_batch($job);
-        } catch (\Throwable $e) {
-            $job['status'] = 'failed';
-            $job['error_general'] = 'Excepción en batch del árbol: ' . $e->getMessage();
-            ADPW_Category_Update_Job_Store::append_debug($job, 'ERROR ' . $job['error_general']);
-        }
-
-        $job['updated_at'] = time();
-        ADPW_Category_Update_Job_Store::append_debug($job, 'Batch árbol end status=' . $job['status']);
-
+        $job = ADPW_Category_Update_Batch_Runner::process($job);
         self::save_job($job);
 
         if (($job['status'] ?? '') === 'running') {

@@ -28,6 +28,8 @@ require_once __DIR__ . '/includes/class-adpw-category-metadata-save-service.php'
 require_once __DIR__ . '/includes/class-adpw-category-metadata-page-actions.php';
 require_once __DIR__ . '/includes/class-adpw-category-update-job-store.php';
 require_once __DIR__ . '/includes/class-adpw-category-update-job-summary.php';
+require_once __DIR__ . '/includes/class-adpw-category-update-job-factory.php';
+require_once __DIR__ . '/includes/class-adpw-category-update-batch-runner.php';
 require_once __DIR__ . '/includes/class-adpw-category-update-queue-manager.php';
 require_once __DIR__ . '/includes/class-adpw-category-metadata-page.php';
 require_once __DIR__ . '/includes/class-adpw-excel-import-support.php';

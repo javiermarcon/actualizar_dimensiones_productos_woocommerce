@@ -24,6 +24,8 @@ require_once dirname(__DIR__) . '/includes/class-adpw-category-metadata-save-ser
 require_once dirname(__DIR__) . '/includes/class-adpw-category-metadata-page-actions.php';
 require_once dirname(__DIR__) . '/includes/class-adpw-category-update-job-store.php';
 require_once dirname(__DIR__) . '/includes/class-adpw-category-update-job-summary.php';
+require_once dirname(__DIR__) . '/includes/class-adpw-category-update-job-factory.php';
+require_once dirname(__DIR__) . '/includes/class-adpw-category-update-batch-runner.php';
 require_once dirname(__DIR__) . '/includes/class-adpw-category-metadata-page.php';
 require_once dirname(__DIR__) . '/includes/class-adpw-import-queue-manager.php';
 require_once dirname(__DIR__) . '/includes/class-adpw-settings.php';

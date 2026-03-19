@@ -156,6 +156,9 @@ if (!isset($GLOBALS['adpw_test_verify_nonce'])) {
 if (!isset($GLOBALS['adpw_test_check_ajax_referer'])) {
     $GLOBALS['adpw_test_check_ajax_referer'] = true;
 }
+if (!isset($GLOBALS['adpw_test_actions'])) {
+    $GLOBALS['adpw_test_actions'] = [];
+}
 
 if (!function_exists('adpw_test_reset_wp_stubs')) {
     function adpw_test_reset_wp_stubs(): void {
@@ -172,6 +175,7 @@ if (!function_exists('adpw_test_reset_wp_stubs')) {
         $GLOBALS['adpw_test_current_user_can'] = true;
         $GLOBALS['adpw_test_verify_nonce'] = true;
         $GLOBALS['adpw_test_check_ajax_referer'] = true;
+        $GLOBALS['adpw_test_actions'] = [];
     }
 }
 
@@ -184,6 +188,12 @@ if (!function_exists('remove_accents')) {
 
 if (!function_exists('add_action')) {
     function add_action(string $hook, $callback, int $priority = 10, int $accepted_args = 1): void {
+        $GLOBALS['adpw_test_actions'][] = [
+            'hook' => $hook,
+            'callback' => $callback,
+            'priority' => $priority,
+            'accepted_args' => $accepted_args,
+        ];
     }
 }
 

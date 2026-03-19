@@ -235,6 +235,67 @@ final class ADPWSettingsAndPagesTest extends TestCase {
         self::assertSame('premium', $GLOBALS['adpw_test_term_meta'][12][ADPW_Category_Metadata_Manager::META_CLASS]);
     }
 
+    public function testCategoryMetadataPageRenderCategoryRowsOutputsIndentedTreeAndFields(): void {
+        $category = new WP_Term();
+        $category->term_id = 12;
+        $category->name = 'Cascos';
+        $category->taxonomy = 'product_cat';
+
+        $shippingClass = new WP_Term();
+        $shippingClass->term_id = 90;
+        $shippingClass->slug = 'premium';
+        $shippingClass->name = 'Premium';
+        $shippingClass->taxonomy = 'product_shipping_class';
+
+        $GLOBALS['adpw_test_term_meta'][12] = [
+            ADPW_Category_Metadata_Manager::META_CLASS => 'premium',
+            ADPW_Category_Metadata_Manager::META_WEIGHT => '1',
+            ADPW_Category_Metadata_Manager::META_HEIGHT => '2',
+            ADPW_Category_Metadata_Manager::META_WIDTH => '3',
+            ADPW_Category_Metadata_Manager::META_DEPTH => '4',
+        ];
+
+        ob_start();
+        $this->invokePrivateStaticMethod(ADPW_Category_Metadata_Page::class, 'render_category_rows', [
+            0,
+            [0 => [$category]],
+            [$shippingClass],
+            1,
+        ]);
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('Cascos', $html);
+        self::assertStringContainsString('padding-left:20px', $html);
+        self::assertStringContainsString('metadata_categoria[12][clase_envio]', $html);
+        self::assertStringContainsString('option value="premium" selected="selected"', $html);
+        self::assertStringContainsString('metadata_categoria[12][peso]', $html);
+    }
+
+    public function testCategoryMetadataPageRenderNumberCellOutputsConfiguredInput(): void {
+        ob_start();
+        $this->invokePrivateStaticMethod(ADPW_Category_Metadata_Page::class, 'render_number_cell', [
+            12,
+            'peso',
+            '1.5',
+        ]);
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('type="number"', $html);
+        self::assertStringContainsString('metadata_categoria[12][peso]', $html);
+        self::assertStringContainsString('data-field="peso"', $html);
+        self::assertStringContainsString('value="1.5"', $html);
+    }
+
+    public function testCategoryMetadataPageRenderPayloadScriptOutputsClientSideDeltaBuilder(): void {
+        ob_start();
+        $this->invokePrivateStaticMethod(ADPW_Category_Metadata_Page::class, 'render_payload_script');
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('adpw-category-metadata-form', $html);
+        self::assertStringContainsString('adpw-metadata-delta-container', $html);
+        self::assertStringContainsString('adpw_no_changes', $html);
+    }
+
     private function invokePrivateStaticMethod(string $className, string $methodName, array $args = []) {
         $reflection = new ReflectionMethod($className, $methodName);
         $reflection->setAccessible(true);

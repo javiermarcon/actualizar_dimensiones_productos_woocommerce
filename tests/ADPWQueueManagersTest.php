@@ -12,8 +12,49 @@ final class ADPWQueueManagersTest extends TestCase {
         adpw_test_reset_wp_stubs();
     }
 
+    public function testImportQueuePrivateSaveAndGetJobDelegateToOptions(): void {
+        $job = [
+            'id' => 'job-private',
+            'status' => 'running',
+        ];
+
+        $this->invokePrivateStaticMethod(ADPW_Import_Queue_Manager::class, 'save_job', [$job]);
+        $saved = $this->invokePrivateStaticMethod(ADPW_Import_Queue_Manager::class, 'get_job');
+
+        self::assertSame($job, $saved);
+    }
+
+    public function testImportQueuePrivateAppendDebugAddsLogEntry(): void {
+        $job = [];
+
+        $this->invokePrivateStaticMethod(ADPW_Import_Queue_Manager::class, 'append_debug', [&$job, 'mensaje de prueba']);
+
+        self::assertCount(1, $job['debug_log']);
+        self::assertStringContainsString('mensaje de prueba', $job['debug_log'][0]);
+    }
+
+    public function testImportQueuePrivateScheduleNextBatchRegistersCronEvent(): void {
+        $this->invokePrivateStaticMethod(ADPW_Import_Queue_Manager::class, 'schedule_next_batch', ['job-private']);
+
+        self::assertCount(1, $GLOBALS['adpw_test_scheduled_events']);
+        $event = array_values($GLOBALS['adpw_test_scheduled_events'])[0];
+        self::assertSame('adpw_process_import_batch', $event['hook']);
+        self::assertSame(['job-private'], $event['args']);
+    }
+
     public function testImportQueueGetJobSnapshotReturnsNullWithoutStoredJob(): void {
         self::assertNull(ADPW_Import_Queue_Manager::get_job_snapshot());
+    }
+
+    public function testImportQueueRegisterHooksRegistersAjaxAndCronCallbacks(): void {
+        ADPW_Import_Queue_Manager::register_hooks();
+
+        self::assertCount(4, $GLOBALS['adpw_test_actions']);
+        self::assertSame('wp_ajax_adpw_start_import', $GLOBALS['adpw_test_actions'][0]['hook']);
+        self::assertSame('wp_ajax_adpw_import_status', $GLOBALS['adpw_test_actions'][1]['hook']);
+        self::assertSame('wp_ajax_adpw_import_run_batch', $GLOBALS['adpw_test_actions'][2]['hook']);
+        self::assertSame('adpw_process_import_batch', $GLOBALS['adpw_test_actions'][3]['hook']);
+        self::assertSame(1, $GLOBALS['adpw_test_actions'][3]['accepted_args']);
     }
 
     public function testImportQueueRunBatchNowFailsWithoutRunningJob(): void {
@@ -55,6 +96,44 @@ final class ADPWQueueManagersTest extends TestCase {
 
         self::assertSame('failed', $job['status']);
         self::assertStringContainsString('Etapa de importación desconocida', $job['error_general']);
+    }
+
+    public function testImportQueueProcessBatchFailsWhenSpreadsheetLoadingThrows(): void {
+        $uploadedFile = sys_get_temp_dir();
+
+        update_option('adpw_import_job', [
+            'id' => 'job-import',
+            'status' => 'running',
+            'stage' => 'parse_sheet',
+            'uploaded_file_path' => $uploadedFile,
+            'categories_data_file' => tempnam(sys_get_temp_dir(), 'adpw-cat-'),
+            'columns' => [
+                'categoria' => 1,
+                'tamano' => false,
+                'peso' => false,
+                'largo' => false,
+                'ancho' => false,
+                'profundidad' => false,
+                'idcat' => false,
+            ],
+            'results' => [
+                'totales' => 0,
+                'parciales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+            'debug_log' => [],
+        ]);
+
+        ADPW_Import_Queue_Manager::process_batch('job-import');
+        $job = get_option('adpw_import_job');
+
+        self::assertSame('failed', $job['status']);
+        self::assertStringContainsString('Excepción en batch:', $job['error_general']);
+        self::assertNotEmpty($job['debug_log']);
+
+        @unlink($job['categories_data_file']);
     }
 
     public function testImportQueueProcessBatchIgnoresDifferentJobIdentifier(): void {
@@ -121,6 +200,20 @@ final class ADPWQueueManagersTest extends TestCase {
 
         self::assertSame('Actualizando productos', $snapshot['stage_label']);
         self::assertSame(83, $snapshot['progress']);
+    }
+
+    public function testImportQueuePrivateBuildSummaryReturnsHundredPercentForCompletedJob(): void {
+        $summary = $this->invokePrivateStaticMethod(ADPW_Import_Queue_Manager::class, 'build_summary', [[
+            'status' => 'completed',
+            'stage' => 'update_products',
+            'product_queue' => [1, 2],
+            'product_cursor' => 1,
+            'updated_at' => 10,
+            'results' => null,
+        ]]);
+
+        self::assertSame('Actualizando productos', $summary['stage_label']);
+        self::assertSame(100, $summary['progress']);
     }
 
     public function testImportQueueGetJobSnapshotBuildsSaveCategoryMetaStageSummary(): void {
@@ -273,6 +366,15 @@ final class ADPWQueueManagersTest extends TestCase {
         self::assertSame('No hay job del árbol en ejecución para procesar.', $result['error_general']);
     }
 
+    public function testCategoryUpdateRegisterHooksRegistersAjaxAndCronCallbacks(): void {
+        ADPW_Category_Update_Queue_Manager::register_hooks();
+
+        self::assertCount(3, $GLOBALS['adpw_test_actions']);
+        self::assertSame('adpw_process_category_update_batch', $GLOBALS['adpw_test_actions'][0]['hook']);
+        self::assertSame('wp_ajax_adpw_category_update_status', $GLOBALS['adpw_test_actions'][1]['hook']);
+        self::assertSame('wp_ajax_adpw_category_update_run_batch', $GLOBALS['adpw_test_actions'][2]['hook']);
+    }
+
     public function testCategoryUpdateRunBatchNowReturnsUpdatedSummaryAfterProcessing(): void {
         $product = new WC_Product(901, 'Mochila');
         $GLOBALS['adpw_test_products'][901] = $product;
@@ -308,5 +410,12 @@ final class ADPWQueueManagersTest extends TestCase {
         self::assertSame('completed', $summary['status']);
         self::assertSame(100, $summary['progress']);
         self::assertSame('4.5', $product->get_height());
+    }
+
+    private function invokePrivateStaticMethod(string $className, string $methodName, array $args = []) {
+        $reflection = new ReflectionMethod($className, $methodName);
+        $reflection->setAccessible(true);
+
+        return $reflection->invokeArgs(null, $args);
     }
 }

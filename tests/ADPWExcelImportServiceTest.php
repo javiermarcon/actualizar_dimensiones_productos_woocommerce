@@ -79,6 +79,34 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertSame([99], $ids);
     }
 
+    public function testFindCategoryIdsByNameReturnsUniqueIdsForExactMatch(): void {
+        $termOne = new WP_Term();
+        $termOne->term_id = 20;
+        $termOne->name = 'Baules';
+        $termOne->slug = 'baules';
+        $termOne->taxonomy = 'product_cat';
+
+        $termTwo = new WP_Term();
+        $termTwo->term_id = 20;
+        $termTwo->name = 'Baules';
+        $termTwo->slug = 'baules-duplicado';
+        $termTwo->taxonomy = 'product_cat';
+
+        $GLOBALS['adpw_test_terms'] = [$termOne, $termTwo];
+
+        $ids = ADPW_Excel_Import_Support::find_category_ids_by_name('Baules');
+
+        self::assertSame([20], $ids);
+    }
+
+    public function testFindCategoryIdsByNameReturnsEmptyArrayWhenCategoriesCannotBeLoaded(): void {
+        $GLOBALS['adpw_test_terms_errors']['product_cat'] = new WP_Error();
+
+        $ids = ADPW_Excel_Import_Support::find_category_ids_by_name('Baules');
+
+        self::assertSame([], $ids);
+    }
+
     public function testValidateHeadersReturnsWarningWhenSizeColumnIsMissing(): void {
         $result = ADPW_Excel_Import_Support::validate_headers([
             'categoria' => 1,
@@ -155,6 +183,17 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertStringContainsString("Fila 8: No se encontró la categoría 'Sin Match'.", $errors[0]);
     }
 
+    public function testResolveCategoryIdsForParseUsesCachedNameAndIdLookups(): void {
+        $errors = [];
+        $nameCache = ['baules' => [17]];
+        $idCache = [17 => 17];
+
+        $ids = ADPW_Excel_Import_Support::resolve_category_ids_for_parse('Baules', 17, 3, $errors, $nameCache, $idCache);
+
+        self::assertSame([17], $ids);
+        self::assertSame([], $errors);
+    }
+
     public function testUpdateShippingClassReturnsErrorWhenClassDoesNotExist(): void {
         $product = new WC_Product(55, 'Casco');
 
@@ -162,6 +201,42 @@ final class ADPWExcelImportServiceTest extends TestCase {
 
         self::assertFalse($result['modificado']);
         self::assertStringContainsString('no encontrada', $result['detalles_errores']);
+    }
+
+    public function testUpdateShippingClassReturnsNoChangeWhenClassIsAlreadyAssigned(): void {
+        $shippingTerm = new WP_Term();
+        $shippingTerm->term_id = 61;
+        $shippingTerm->name = 'Premium';
+        $shippingTerm->slug = 'premium';
+        $shippingTerm->taxonomy = 'product_shipping_class';
+        $GLOBALS['adpw_test_terms'] = [$shippingTerm];
+
+        $product = new WC_Product(56, 'Casco');
+        $product->set_shipping_class_id(61);
+
+        $result = ADPW_Excel_Product_Update_Service::update_shipping_class($product, 'premium');
+
+        self::assertFalse($result['modificado']);
+        self::assertSame('', $result['detalles_errores']);
+        self::assertSame('', $result['log_producto']);
+    }
+
+    public function testUpdateShippingClassFindsTermByName(): void {
+        $shippingTerm = new WP_Term();
+        $shippingTerm->term_id = 62;
+        $shippingTerm->name = 'Clase Premium';
+        $shippingTerm->slug = 'clase-premium';
+        $shippingTerm->taxonomy = 'product_shipping_class';
+        $GLOBALS['adpw_test_terms'] = [$shippingTerm];
+
+        $product = new WC_Product(57, 'Casco');
+        $product->set_shipping_class('base');
+
+        $result = ADPW_Excel_Product_Update_Service::update_shipping_class($product, 'Clase Premium');
+
+        self::assertTrue($result['modificado']);
+        self::assertSame(62, $product->get_shipping_class_id());
+        self::assertStringContainsString('Nueva clase: Clase Premium', $result['log_producto']);
     }
 
     public function testUpdateDimensionsUpdatesOnlyMissingFieldsWhenActualizarSiempreIsFalse(): void {
@@ -180,6 +255,54 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertSame('10', $product->get_length());
         self::assertSame('20', $product->get_width());
         self::assertSame('30', $product->get_height());
+    }
+
+    public function testUpdateDimensionsReturnsNoChangesWhenIncomingValuesAreEmpty(): void {
+        $product = new WC_Product(78, 'Parrilla');
+        $product->set_weight(1.2);
+        $product->set_length(2);
+        $product->set_width(3);
+        $product->set_height(4);
+
+        $result = ADPW_Excel_Product_Update_Service::update_dimensions($product, [
+            'peso' => 0,
+            'largo' => 0,
+            'ancho' => 0,
+            'profundidad' => 0,
+        ], true, 'Accesorios', 78);
+
+        self::assertFalse($result['modificado']);
+        self::assertTrue($result['actualizacion_total']);
+        self::assertStringContainsString('Actualizando el producto', $result['log_producto']);
+        self::assertSame(0, $product->get_save_count());
+    }
+
+    public function testProcessProductUpdateRecordsErrorWhenProductCannotBeLoaded(): void {
+        $results = [
+            'totales' => 0,
+            'parciales' => 0,
+            'errores' => 0,
+            'detalles' => [],
+            'productos_modificados' => [],
+        ];
+
+        ADPW_Excel_Product_Update_Service::process_product_update(999, [
+            'categoria' => 'Viaje',
+            'tamano' => '',
+            'peso' => 0,
+            'largo' => 0,
+            'ancho' => 0,
+            'profundidad' => 0,
+        ], [
+            'actualizar_si' => 1,
+            'actualizar_cat' => 0,
+        ], [
+            'actualizar_tam_dimensiones' => true,
+            'solo_tamano_desde_excel' => false,
+        ], $results);
+
+        self::assertSame(1, $results['errores']);
+        self::assertStringContainsString('No se pudo cargar el producto con ID 999', $results['detalles'][0]);
     }
 
     public function testProcessProductUpdateRecordsDimensionAndShippingChanges(): void {
@@ -220,6 +343,65 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertSame(61, $product->get_shipping_class_id());
         self::assertNotEmpty($results['detalles']);
         self::assertNotEmpty($results['productos_modificados']);
+    }
+
+    public function testReadEntryFromSheetExtractsTypedValues(): void {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setCellValue('A2', 'Baules');
+        $sheet->setCellValue('B2', '17');
+        $sheet->setCellValue('C2', '10.5');
+        $sheet->setCellValue('D2', '20');
+        $sheet->setCellValue('E2', '30');
+        $sheet->setCellValue('F2', '40');
+        $sheet->setCellValue('G2', 'premium');
+
+        $entry = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'read_entry_from_sheet', [
+            $sheet,
+            [
+                'categoria' => 1,
+                'idcat' => 2,
+                'largo' => 3,
+                'ancho' => 4,
+                'profundidad' => 5,
+                'peso' => 6,
+                'tamano' => 7,
+            ],
+            2,
+        ]);
+
+        self::assertSame(2, $entry['row']);
+        self::assertSame('Baules', $entry['categoria']);
+        self::assertSame(17, $entry['idcat']);
+        self::assertSame(10.5, $entry['largo']);
+        self::assertSame(20.0, $entry['ancho']);
+        self::assertSame(30.0, $entry['profundidad']);
+        self::assertSame(40.0, $entry['peso']);
+        self::assertSame('premium', $entry['tamano']);
+    }
+
+    public function testIsEmptyEntryRecognizesEmptyAndNonEmptyRows(): void {
+        $empty = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'is_empty_entry', [[
+            'categoria' => '',
+            'idcat' => 0,
+            'largo' => 0,
+            'ancho' => 0,
+            'profundidad' => 0,
+            'peso' => 0,
+            'tamano' => '',
+        ]]);
+        $nonEmpty = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'is_empty_entry', [[
+            'categoria' => '',
+            'idcat' => 0,
+            'largo' => 0,
+            'ancho' => 0,
+            'profundidad' => 0,
+            'peso' => 0,
+            'tamano' => 'premium',
+        ]]);
+
+        self::assertTrue($empty);
+        self::assertFalse($nonEmpty);
     }
 
     public function testProcessParseSheetBatchBuildsCategoryMapAndTransitionsStage(): void {
@@ -386,6 +568,92 @@ final class ADPWExcelImportServiceTest extends TestCase {
         @unlink($categoriesFile);
     }
 
+    public function testProcessSaveCategoryMetaBatchTransitionsImmediatelyWhenThereAreNoCategoriesLeft(): void {
+        $job = [
+            'batch_size' => 5,
+            'category_cursor' => 0,
+            'category_ids' => [],
+            'product_cursor' => 9,
+        ];
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'process_save_category_meta_batch', [&$job]);
+
+        self::assertSame('update_products', $job['stage']);
+        self::assertSame(0, $job['category_cursor']);
+        self::assertSame([], $job['product_queue']);
+        self::assertSame(0, $job['product_cursor']);
+    }
+
+    public function testPrepareProductQueueBuildsQueueFromMostSpecificCategory(): void {
+        $GLOBALS['adpw_test_posts'] = [501];
+        $GLOBALS['adpw_test_post_terms'][501] = [7, 8];
+        $GLOBALS['adpw_test_ancestors'][7] = [];
+        $GLOBALS['adpw_test_ancestors'][8] = [7];
+
+        $job = [
+            'category_ids' => [7, 8],
+            'product_cursor' => 5,
+        ];
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'prepare_product_queue', [&$job]);
+
+        self::assertSame([[
+            'product_id' => 501,
+            'category_id' => 8,
+        ]], $job['product_queue']);
+        self::assertSame(0, $job['product_cursor']);
+    }
+
+    public function testProcessUpdateProductsBatchCompletesAndSkipsInvalidQueueItems(): void {
+        $categoriesFile = tempnam(sys_get_temp_dir(), 'adpw-cat-');
+        $uploadedFile = tempnam(sys_get_temp_dir(), 'adpw-xlsx-');
+        file_put_contents($categoriesFile, json_encode([
+            '7' => [
+                'categoria' => 'Viaje',
+                'tamano' => '',
+                'peso' => 1.1,
+                'ancho' => 2.2,
+                'largo' => 3.3,
+                'profundidad' => 4.4,
+            ],
+        ]));
+
+        $job = [
+            'batch_size' => 10,
+            'product_cursor' => 0,
+            'product_queue' => [
+                ['product_id' => 0, 'category_id' => 7],
+                ['product_id' => 10, 'category_id' => 0],
+                ['product_id' => 10, 'category_id' => 99],
+            ],
+            'categories_data_file' => $categoriesFile,
+            'uploaded_file_path' => $uploadedFile,
+            'settings' => [
+                'actualizar_si' => 1,
+                'actualizar_cat' => 0,
+            ],
+            'mode' => [
+                'actualizar_tam_dimensiones' => true,
+                'solo_tamano_desde_excel' => false,
+            ],
+            'results' => [
+                'totales' => 0,
+                'parciales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+        ];
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'process_update_products_batch', [&$job]);
+
+        self::assertSame('completed', $job['status']);
+        self::assertSame(3, $job['product_cursor']);
+        self::assertFileDoesNotExist($categoriesFile);
+        self::assertFileDoesNotExist($uploadedFile);
+        self::assertSame(0, $job['results']['totales']);
+    }
+
     public function testLoadJsonFileReturnsEmptyArrayForInvalidJson(): void {
         $jsonFile = tempnam(sys_get_temp_dir(), 'adpw-json-');
         file_put_contents($jsonFile, '{invalid');
@@ -394,6 +662,36 @@ final class ADPWExcelImportServiceTest extends TestCase {
 
         self::assertSame([], $result);
         @unlink($jsonFile);
+    }
+
+    public function testLoadJsonFileReturnsEmptyArrayForMissingFile(): void {
+        $result = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'load_json_file', [sys_get_temp_dir() . '/adpw-missing-file.json']);
+
+        self::assertSame([], $result);
+    }
+
+    public function testAppendLimitedStopsAtConfiguredLimit(): void {
+        $messages = ['uno'];
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'append_limited', [&$messages, 'dos', 1]);
+
+        self::assertSame(['uno'], $messages);
+    }
+
+    public function testProductUpdateAppendLimitedStopsAtConfiguredLimit(): void {
+        $messages = ['uno'];
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Product_Update_Service::class, 'append_limited', [&$messages, 'dos', 1]);
+
+        self::assertSame(['uno'], $messages);
+    }
+
+    public function testSupportAppendLimitedStopsAtConfiguredLimit(): void {
+        $messages = ['uno'];
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Support::class, 'append_limited', [&$messages, 'dos', 1]);
+
+        self::assertSame(['uno'], $messages);
     }
 
     public function testSaveJsonFilePersistsEncodedData(): void {

@@ -78,9 +78,10 @@ final class ADPW_Category_Metadata_Manager {
         $queue = self::build_product_queue_for_categories($category_ids);
         $shipping_class_cache = [];
         $updated_products = 0;
+        $results = null;
 
         foreach ($queue as $queue_item) {
-            if (self::apply_category_metadata_to_product_id((int) $queue_item['product_id'], (int) $queue_item['category_id'], $shipping_class_cache, null)) {
+            if (self::apply_category_metadata_to_product_id((int) $queue_item['product_id'], (int) $queue_item['category_id'], $shipping_class_cache, $results)) {
                 $updated_products++;
             }
         }

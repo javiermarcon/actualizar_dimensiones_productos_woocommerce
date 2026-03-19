@@ -16,29 +16,18 @@ final class ADPW_Category_Update_Queue_Manager {
     }
 
     public static function start_job($category_ids, $batch_size) {
-        $category_ids = array_values(array_unique(array_map('absint', (array) $category_ids)));
-        if (empty($category_ids)) {
-            return ['error_general' => 'No hay categorías para actualizar en segundo plano.'];
+        $start = ADPW_Category_Update_Start_Service::start($category_ids, $batch_size, self::get_job());
+        if (!empty($start['error_general'])) {
+            return $start;
         }
 
-        $existing = self::get_job();
-        if ($existing && ($existing['status'] ?? '') === 'running') {
-            return ['error_general' => 'Ya hay una actualización del árbol en ejecución. Esperá a que termine antes de iniciar otra.'];
-        }
-
-        $queue = ADPW_Category_Metadata_Manager::build_product_queue_for_categories($category_ids);
-        $job = ADPW_Category_Update_Job_Factory::create_job($category_ids, $batch_size, $queue);
+        $job = $start['job'];
         self::save_job($job);
         if (($job['status'] ?? '') === 'running') {
             self::schedule_next_batch($job['id']);
         }
 
-        return [
-            'job_id' => $job['id'],
-            'batch_size' => $job['batch_size'],
-            'total_entries' => count($queue),
-            'status' => $job['status'],
-        ];
+        return $start['response'];
     }
 
     public static function run_batch_now() {

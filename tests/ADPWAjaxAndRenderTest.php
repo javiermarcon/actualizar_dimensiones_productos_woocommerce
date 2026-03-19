@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PHPUnit\Framework\TestCase;
 
 final class ADPWAjaxAndRenderTest extends TestCase {
@@ -35,6 +38,18 @@ final class ADPWAjaxAndRenderTest extends TestCase {
         }
     }
 
+    public function testImportAjaxStatusRejectsInvalidNonce(): void {
+        $GLOBALS['adpw_test_check_ajax_referer'] = false;
+
+        try {
+            ADPW_Import_Queue_Manager::ajax_import_status();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertFalse($e->success);
+            self::assertSame('Nonce inválido.', $e->payload['message']);
+        }
+    }
+
     public function testImportAjaxRunBatchReturnsErrorWhenNoJobIsRunning(): void {
         try {
             ADPW_Import_Queue_Manager::ajax_run_batch();
@@ -42,6 +57,18 @@ final class ADPWAjaxAndRenderTest extends TestCase {
         } catch (ADPW_Test_Json_Response_Exception $e) {
             self::assertFalse($e->success);
             self::assertSame('No hay job en ejecución para procesar.', $e->payload['error_general']);
+        }
+    }
+
+    public function testImportAjaxRunBatchRejectsUserWithoutPermissions(): void {
+        $GLOBALS['adpw_test_current_user_can'] = false;
+
+        try {
+            ADPW_Import_Queue_Manager::ajax_run_batch();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertFalse($e->success);
+            self::assertSame('No tenés permisos para ejecutar lotes.', $e->payload['message']);
         }
     }
 
@@ -55,6 +82,61 @@ final class ADPWAjaxAndRenderTest extends TestCase {
             self::assertFalse($e->success);
             self::assertSame('No tenés permisos para iniciar la importación.', $e->payload['message']);
         }
+    }
+
+    public function testImportAjaxStartImportReturnsSuccessForValidSpreadsheet(): void {
+        $uploadedFile = $this->createSpreadsheetFile([
+            ['Categoria', 'Tamano', 'Peso', 'Ancho', 'Largo', 'Profundidad'],
+            ['Cascos', 'premium', '1', '2', '3', '4'],
+        ]);
+
+        $serviceReflection = new ReflectionClass(ADPW_Excel_Import_Service::class);
+        $validator = $serviceReflection->getProperty('uploaded_file_validator');
+        $validator->setAccessible(true);
+        $validator->setValue(null, static fn (): bool => true);
+
+        $mover = $serviceReflection->getProperty('uploaded_file_mover');
+        $mover->setAccessible(true);
+        $mover->setValue(null, static function (string $from, string $to): bool {
+            return copy($from, $to);
+        });
+
+        $uploadDirProvider = $serviceReflection->getProperty('upload_dir_provider');
+        $uploadDirProvider->setAccessible(true);
+        $uploadDirProvider->setValue(null, static function (): array {
+            return [
+                'basedir' => sys_get_temp_dir(),
+                'baseurl' => 'http://example.test/uploads',
+            ];
+        });
+
+        $mkdirProvider = $serviceReflection->getProperty('mkdir_p_callback');
+        $mkdirProvider->setAccessible(true);
+        $mkdirProvider->setValue(null, static fn (string $path): bool => is_dir($path) || mkdir($path, 0777, true));
+
+        $_FILES = [
+            'archivo_excel' => [
+                'name' => 'import.xlsx',
+                'tmp_name' => $uploadedFile,
+                'size' => filesize($uploadedFile),
+                'error' => 0,
+            ],
+        ];
+
+        try {
+            ADPW_Import_Queue_Manager::ajax_start_import();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertTrue($e->success);
+            self::assertSame('parse_sheet', $e->payload['stage']);
+            self::assertSame(20, $e->payload['batch_size']);
+        }
+
+        $validator->setValue(null, null);
+        $mover->setValue(null, null);
+        $uploadDirProvider->setValue(null, null);
+        $mkdirProvider->setValue(null, null);
+        @unlink($uploadedFile);
     }
 
     public function testCategoryUpdateAjaxStatusReturnsIdleWhenNoJobExists(): void {
@@ -74,6 +156,30 @@ final class ADPWAjaxAndRenderTest extends TestCase {
         } catch (ADPW_Test_Json_Response_Exception $e) {
             self::assertFalse($e->success);
             self::assertSame('No hay job del árbol en ejecución para procesar.', $e->payload['error_general']);
+        }
+    }
+
+    public function testCategoryUpdateAjaxRunBatchRejectsInvalidNonce(): void {
+        $GLOBALS['adpw_test_check_ajax_referer'] = false;
+
+        try {
+            ADPW_Category_Update_Queue_Manager::ajax_run_batch();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertFalse($e->success);
+            self::assertSame('Nonce inválido.', $e->payload['message']);
+        }
+    }
+
+    public function testCategoryUpdateAjaxStatusRejectsUserWithoutPermissions(): void {
+        $GLOBALS['adpw_test_current_user_can'] = false;
+
+        try {
+            ADPW_Category_Update_Queue_Manager::ajax_status();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertFalse($e->success);
+            self::assertSame('No tenés permisos para consultar estado.', $e->payload['message']);
         }
     }
 
@@ -248,5 +354,22 @@ final class ADPWAjaxAndRenderTest extends TestCase {
             self::assertSame('completed', $e->payload['status']);
             self::assertSame(100, $e->payload['progress']);
         }
+    }
+
+    private function createSpreadsheetFile(array $rows): string {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+
+        foreach ($rows as $rowIndex => $row) {
+            foreach ($row as $columnIndex => $value) {
+                $sheet->setCellValue(Coordinate::stringFromColumnIndex($columnIndex + 1) . (string) ($rowIndex + 1), $value);
+            }
+        }
+
+        $file = tempnam(sys_get_temp_dir(), 'adpw-xlsx-');
+        $writer = new Xlsx($spreadsheet);
+        $writer->save($file);
+
+        return $file;
     }
 }

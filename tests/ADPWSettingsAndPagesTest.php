@@ -37,6 +37,15 @@ final class ADPWSettingsAndPagesTest extends TestCase {
         self::assertSame(20, $settings['categorias_por_lote']);
     }
 
+    public function testSettingsGetFallsBackToDefaultsWhenSavedOptionIsInvalid(): void {
+        update_option('adpw_import_settings', 'corrupto');
+
+        $settings = ADPW_Settings::get();
+
+        self::assertSame(0, $settings['actualizar_si']);
+        self::assertSame(20, $settings['categorias_por_lote']);
+    }
+
     public function testSettingsHandleSaveRequestRejectsUsersWithoutPermissions(): void {
         $GLOBALS['adpw_test_current_user_can'] = false;
 
@@ -116,6 +125,17 @@ final class ADPWSettingsAndPagesTest extends TestCase {
         $tab = $this->invokePrivateStaticMethod(ADPW_Settings::class, 'get_active_tab');
 
         self::assertSame('tree', $tab);
+    }
+
+    public function testSettingsRenderTabsOutputsAllNavigationLinks(): void {
+        ob_start();
+        ADPW_Settings_Page_Renderer::render_tabs('tree');
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('Común', $html);
+        self::assertStringContainsString('Importación Excel', $html);
+        self::assertStringContainsString('Árbol de categorías', $html);
+        self::assertStringContainsString('nav-tab-active', $html);
     }
 
     public function testExcelImportPageBuildRequestDebugIncludesFileMetadata(): void {
@@ -198,6 +218,45 @@ final class ADPWSettingsAndPagesTest extends TestCase {
         $html = (string) ob_get_clean();
 
         self::assertStringContainsString('No se pudieron cargar categorías o clases de envío.', $html);
+    }
+
+    public function testCategoryMetadataPageRenderShowsSuccessNoticeForManualBatch(): void {
+        $product = new WC_Product(901, 'Mochila');
+        $GLOBALS['adpw_test_products'][901] = $product;
+        $GLOBALS['adpw_test_term_meta'][7] = [
+            ADPW_Category_Metadata_Manager::META_HEIGHT => '4.5',
+        ];
+
+        update_option('adpw_category_update_job', [
+            'id' => 'job-tree',
+            'status' => 'running',
+            'stage' => 'update_products',
+            'batch_size' => 10,
+            'product_cursor' => 0,
+            'product_queue' => [[
+                'product_id' => 901,
+                'category_id' => 7,
+            ]],
+            'runtime' => [],
+            'results' => [
+                'totales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+            'debug_log' => [],
+        ]);
+
+        $_POST = [
+            'adpw_run_category_tree_batch' => '1',
+            'adpw_category_tree_manual_batch_nonce' => 'nonce',
+        ];
+
+        ob_start();
+        ADPW_Category_Metadata_Page::render_page();
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('Se ejecutó manualmente un lote de actualización del árbol.', $html);
     }
 
     public function testCategoryMetadataPageHandleSaveRequestRejectsUsersWithoutPermissions(): void {

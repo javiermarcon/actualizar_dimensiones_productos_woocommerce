@@ -385,19 +385,15 @@ final class ADPWExcelImportServiceTest extends TestCase {
         $sheet->setCellValue('F2', '40');
         $sheet->setCellValue('G2', 'premium');
 
-        $entry = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'read_entry_from_sheet', [
-            $sheet,
-            [
-                'categoria' => 1,
-                'idcat' => 2,
-                'largo' => 3,
-                'ancho' => 4,
-                'profundidad' => 5,
-                'peso' => 6,
-                'tamano' => 7,
-            ],
-            2,
-        ]);
+        $entry = ADPW_Excel_Parse_Sheet_Batch_Service::read_entry_from_sheet($sheet, [
+            'categoria' => 1,
+            'idcat' => 2,
+            'largo' => 3,
+            'ancho' => 4,
+            'profundidad' => 5,
+            'peso' => 6,
+            'tamano' => 7,
+        ], 2);
 
         self::assertSame(2, $entry['row']);
         self::assertSame('Baules', $entry['categoria']);
@@ -581,7 +577,7 @@ final class ADPWExcelImportServiceTest extends TestCase {
     }
 
     public function testIsEmptyEntryRecognizesEmptyAndNonEmptyRows(): void {
-        $empty = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'is_empty_entry', [[
+        $empty = ADPW_Excel_Parse_Sheet_Batch_Service::is_empty_entry([
             'categoria' => '',
             'idcat' => 0,
             'largo' => 0,
@@ -589,8 +585,8 @@ final class ADPWExcelImportServiceTest extends TestCase {
             'profundidad' => 0,
             'peso' => 0,
             'tamano' => '',
-        ]]);
-        $nonEmpty = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'is_empty_entry', [[
+        ]);
+        $nonEmpty = ADPW_Excel_Parse_Sheet_Batch_Service::is_empty_entry([
             'categoria' => '',
             'idcat' => 0,
             'largo' => 0,
@@ -598,7 +594,7 @@ final class ADPWExcelImportServiceTest extends TestCase {
             'profundidad' => 0,
             'peso' => 0,
             'tamano' => 'premium',
-        ]]);
+        ]);
 
         self::assertTrue($empty);
         self::assertFalse($nonEmpty);
@@ -644,7 +640,7 @@ final class ADPWExcelImportServiceTest extends TestCase {
             ],
         ];
 
-        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'process_parse_sheet_batch', [&$job]);
+        ADPW_Excel_Parse_Sheet_Batch_Service::process($job);
 
         $categoryMap = json_decode((string) file_get_contents($categoriesFile), true);
 
@@ -711,7 +707,7 @@ final class ADPWExcelImportServiceTest extends TestCase {
             ],
         ];
 
-        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'process_parse_sheet_batch', [&$job]);
+        ADPW_Excel_Parse_Sheet_Batch_Service::process($job);
 
         self::assertSame('save_category_meta', $job['stage']);
         self::assertSame([10, 11], $job['category_ids']);
@@ -758,7 +754,7 @@ final class ADPWExcelImportServiceTest extends TestCase {
             ],
         ];
 
-        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'process_parse_sheet_batch', [&$job]);
+        ADPW_Excel_Parse_Sheet_Batch_Service::process($job);
 
         self::assertSame('save_category_meta', $job['stage']);
         self::assertSame(1, $job['results']['errores']);
@@ -776,7 +772,7 @@ final class ADPWExcelImportServiceTest extends TestCase {
             'product_cursor' => 9,
         ];
 
-        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'process_save_category_meta_batch', [&$job]);
+        ADPW_Excel_Save_Category_Meta_Batch_Service::process($job);
 
         self::assertSame('update_products', $job['stage']);
         self::assertSame(0, $job['category_cursor']);
@@ -795,7 +791,7 @@ final class ADPWExcelImportServiceTest extends TestCase {
             'product_cursor' => 5,
         ];
 
-        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'prepare_product_queue', [&$job]);
+        ADPW_Excel_Save_Category_Meta_Batch_Service::prepare_product_queue($job);
 
         self::assertSame([[
             'product_id' => 501,
@@ -845,7 +841,7 @@ final class ADPWExcelImportServiceTest extends TestCase {
             ],
         ];
 
-        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'process_update_products_batch', [&$job]);
+        ADPW_Excel_Update_Products_Batch_Service::process($job);
 
         self::assertSame('completed', $job['status']);
         self::assertSame(3, $job['product_cursor']);
@@ -858,10 +854,10 @@ final class ADPWExcelImportServiceTest extends TestCase {
         $categoriesFile = tempnam(sys_get_temp_dir(), 'adpw-cat-');
         $uploadedFile = tempnam(sys_get_temp_dir(), 'adpw-xlsx-');
 
-        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'cleanup_job_files', [[
+        ADPW_Excel_Import_Temp_Store::cleanup_job_files([
             'uploaded_file_path' => $uploadedFile,
             'categories_data_file' => $categoriesFile,
-        ]]);
+        ]);
 
         self::assertFileDoesNotExist($uploadedFile);
         self::assertFileDoesNotExist($categoriesFile);
@@ -873,7 +869,7 @@ final class ADPWExcelImportServiceTest extends TestCase {
             ['Baules', 10],
         ]);
 
-        $spreadsheet = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'load_spreadsheet', [$uploadedFile]);
+        $spreadsheet = ADPW_Excel_Import_Temp_Store::load_spreadsheet($uploadedFile);
 
         self::assertSame('Categoria', $spreadsheet->getActiveSheet()->getCell('A1')->getFormattedValue());
         self::assertSame('Baules', $spreadsheet->getActiveSheet()->getCell('A2')->getFormattedValue());
@@ -885,14 +881,14 @@ final class ADPWExcelImportServiceTest extends TestCase {
         $jsonFile = tempnam(sys_get_temp_dir(), 'adpw-json-');
         file_put_contents($jsonFile, '{invalid');
 
-        $result = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'load_json_file', [$jsonFile]);
+        $result = ADPW_Excel_Import_Temp_Store::load_json_file($jsonFile);
 
         self::assertSame([], $result);
         @unlink($jsonFile);
     }
 
     public function testLoadJsonFileReturnsEmptyArrayForMissingFile(): void {
-        $result = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'load_json_file', [sys_get_temp_dir() . '/adpw-missing-file.json']);
+        $result = ADPW_Excel_Import_Temp_Store::load_json_file(sys_get_temp_dir() . '/adpw-missing-file.json');
 
         self::assertSame([], $result);
     }
@@ -900,7 +896,7 @@ final class ADPWExcelImportServiceTest extends TestCase {
     public function testAppendLimitedStopsAtConfiguredLimit(): void {
         $messages = ['uno'];
 
-        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'append_limited', [&$messages, 'dos', 1]);
+        ADPW_Excel_Parse_Sheet_Batch_Service::append_limited($messages, 'dos', 1);
 
         self::assertSame(['uno'], $messages);
     }
@@ -924,7 +920,7 @@ final class ADPWExcelImportServiceTest extends TestCase {
     public function testSaveJsonFilePersistsEncodedData(): void {
         $jsonFile = tempnam(sys_get_temp_dir(), 'adpw-json-');
 
-        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'save_json_file', [$jsonFile, ['ok' => true, 'count' => 2]]);
+        ADPW_Excel_Import_Temp_Store::save_json_file($jsonFile, ['ok' => true, 'count' => 2]);
 
         self::assertSame(['ok' => true, 'count' => 2], json_decode((string) file_get_contents($jsonFile), true));
         @unlink($jsonFile);

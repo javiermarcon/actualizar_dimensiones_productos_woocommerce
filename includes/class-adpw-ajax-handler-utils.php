@@ -12,7 +12,10 @@ final class ADPW_Ajax_Handler_Utils {
     }
 
     public static function verify_nonce($action, $field = 'nonce') {
-        check_ajax_referer($action, $field);
+        $valid = check_ajax_referer($action, $field, false);
+        if ($valid === false) {
+            wp_send_json_error(['message' => 'Nonce inválido.']);
+        }
     }
 
     public static function success($payload) {

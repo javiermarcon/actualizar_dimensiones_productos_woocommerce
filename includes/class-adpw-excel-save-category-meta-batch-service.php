@@ -36,13 +36,7 @@ final class ADPW_Excel_Save_Category_Meta_Batch_Service {
                 continue;
             }
 
-            $metadata = [
-                'clase_envio' => (string) ($entry['tamano'] ?? ''),
-                'peso' => (string) ($entry['peso'] ?? ''),
-                'alto' => (string) ($entry['profundidad'] ?? ''),
-                'ancho' => (string) ($entry['ancho'] ?? ''),
-                'profundidad' => (string) ($entry['largo'] ?? ''),
-            ];
+            $metadata = self::build_metadata_from_entry($entry, (array) ($job['columns'] ?? []));
 
             ADPW_Category_Metadata_Manager::save_category_metadata($category_id, $metadata, $valid_shipping_slugs);
         }
@@ -60,5 +54,37 @@ final class ADPW_Excel_Save_Category_Meta_Batch_Service {
         $category_ids = isset($job['category_ids']) && is_array($job['category_ids']) ? $job['category_ids'] : [];
         $job['product_queue'] = ADPW_Category_Metadata_Manager::build_product_queue_for_categories($category_ids);
         $job['product_cursor'] = 0;
+    }
+
+    private static function build_metadata_from_entry(array $entry, array $columns): array {
+        $metadata = [];
+        $has_column_map = !empty($columns);
+
+        if ((!$has_column_map || ($columns['tamano'] ?? false) !== false)) {
+            $tamano = trim((string) ($entry['tamano'] ?? ''));
+            if ($tamano !== '') {
+                $metadata['clase_envio'] = $tamano;
+            }
+        }
+
+        self::append_numeric_metadata($metadata, $columns, 'peso', 'peso', $entry, $has_column_map);
+        self::append_numeric_metadata($metadata, $columns, 'profundidad', 'alto', $entry, $has_column_map);
+        self::append_numeric_metadata($metadata, $columns, 'ancho', 'ancho', $entry, $has_column_map);
+        self::append_numeric_metadata($metadata, $columns, 'largo', 'profundidad', $entry, $has_column_map);
+
+        return $metadata;
+    }
+
+    private static function append_numeric_metadata(array &$metadata, array $columns, string $column_key, string $meta_key, array $entry, bool $has_column_map): void {
+        if ($has_column_map && ($columns[$column_key] ?? false) === false) {
+            return;
+        }
+
+        $value = (float) ($entry[$column_key] ?? 0);
+        if ($value <= 0) {
+            return;
+        }
+
+        $metadata[$meta_key] = (string) $value;
     }
 }

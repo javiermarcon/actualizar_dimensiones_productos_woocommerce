@@ -46,6 +46,12 @@ La importación se ejecuta en segundo plano por lotes usando `wp-cron` y muestra
 
 ## Importación desde Excel
 
+La importación solo modifica un campo cuando la planilla trae un valor explícito para ese campo.
+
+- Si una columna no existe en el Excel, ese dato no se toca.
+- Si una celda viene vacía, ese dato no se borra ni en metadata de categoría ni en productos.
+- Esto aplica tanto a dimensiones/peso como a `Tamaño` (clase de envío).
+
 ### Encabezados reconocidos
 
 - `Categoría`
@@ -98,6 +104,7 @@ La pantalla `Configuración` está dividida en 3 pestañas:
 
 - `Actualizar siempre`
   - Fuerza actualización de dimensiones incluso si el producto ya tiene datos.
+  - Aun así, solo reemplaza campos que vengan con valor explícito en la planilla.
 - `Actualizar dimensiones (peso/largo/ancho/profundidad) o tamaño si el Excel solo trae Categoría + tamaño`
   - Actualiza dimensiones cuando están presentes.
   - Si no hay columnas de dimensiones y sí hay `Tamaño`, usa fallback para actualizar tamaño.
@@ -144,6 +151,7 @@ Si en `Configuración > Árbol de categorías` está activa la opción `Actualiz
 
 - El plugin encola la actualización y procesa productos asociados a esas categorías por lotes usando `wp-cron`.
 - Si un producto pertenece a múltiples categorías editadas, aplica la metadata de la categoría **más específica** (más profunda en el árbol).
+- Solo aplica a productos los valores de metadata que existan explícitamente en la categoría; no limpia campos ausentes.
 
 ## Errores y validaciones
 

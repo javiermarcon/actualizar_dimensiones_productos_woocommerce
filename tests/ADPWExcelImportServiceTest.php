@@ -1051,6 +1051,108 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertSame(0, $job['product_cursor']);
     }
 
+    public function testProcessSaveCategoryMetaBatchOnlyPersistsFieldsProvidedByExcel(): void {
+        $shippingTerm = new WP_Term();
+        $shippingTerm->term_id = 81;
+        $shippingTerm->slug = 'premium';
+        $shippingTerm->name = 'Premium';
+        $shippingTerm->taxonomy = 'product_shipping_class';
+        $GLOBALS['adpw_test_terms'] = [$shippingTerm];
+
+        $GLOBALS['adpw_test_term_meta'][7] = [
+            ADPW_Category_Metadata_Manager::META_WEIGHT => '1.1',
+            ADPW_Category_Metadata_Manager::META_HEIGHT => '2.2',
+            ADPW_Category_Metadata_Manager::META_WIDTH => '3.3',
+            ADPW_Category_Metadata_Manager::META_DEPTH => '4.4',
+        ];
+
+        $categoriesFile = tempnam(sys_get_temp_dir(), 'adpw-cat-');
+        file_put_contents($categoriesFile, json_encode([
+            '7' => [
+                'categoria' => 'Viaje',
+                'tamano' => 'premium',
+                'peso' => 0,
+                'ancho' => 0,
+                'largo' => 0,
+                'profundidad' => 0,
+            ],
+        ]));
+
+        $job = [
+            'batch_size' => 5,
+            'category_cursor' => 0,
+            'category_ids' => [7],
+            'categories_data_file' => $categoriesFile,
+            'columns' => [
+                'categoria' => 1,
+                'tamano' => 2,
+                'peso' => false,
+                'largo' => false,
+                'ancho' => false,
+                'profundidad' => false,
+                'idcat' => false,
+            ],
+        ];
+
+        ADPW_Excel_Save_Category_Meta_Batch_Service::process($job);
+
+        self::assertSame('update_products', $job['stage']);
+        self::assertSame('premium', $GLOBALS['adpw_test_term_meta'][7][ADPW_Category_Metadata_Manager::META_CLASS]);
+        self::assertSame('1.1', $GLOBALS['adpw_test_term_meta'][7][ADPW_Category_Metadata_Manager::META_WEIGHT]);
+        self::assertSame('2.2', $GLOBALS['adpw_test_term_meta'][7][ADPW_Category_Metadata_Manager::META_HEIGHT]);
+        self::assertSame('3.3', $GLOBALS['adpw_test_term_meta'][7][ADPW_Category_Metadata_Manager::META_WIDTH]);
+        self::assertSame('4.4', $GLOBALS['adpw_test_term_meta'][7][ADPW_Category_Metadata_Manager::META_DEPTH]);
+
+        @unlink($categoriesFile);
+    }
+
+    public function testProcessSaveCategoryMetaBatchSkipsBlankValuesEvenWhenColumnsExist(): void {
+        $GLOBALS['adpw_test_term_meta'][7] = [
+            ADPW_Category_Metadata_Manager::META_WEIGHT => '1.1',
+            ADPW_Category_Metadata_Manager::META_HEIGHT => '2.2',
+            ADPW_Category_Metadata_Manager::META_WIDTH => '3.3',
+            ADPW_Category_Metadata_Manager::META_DEPTH => '4.4',
+        ];
+
+        $categoriesFile = tempnam(sys_get_temp_dir(), 'adpw-cat-');
+        file_put_contents($categoriesFile, json_encode([
+            '7' => [
+                'categoria' => 'Viaje',
+                'tamano' => '',
+                'peso' => 0,
+                'ancho' => 0,
+                'largo' => 0,
+                'profundidad' => 0,
+            ],
+        ]));
+
+        $job = [
+            'batch_size' => 5,
+            'category_cursor' => 0,
+            'category_ids' => [7],
+            'categories_data_file' => $categoriesFile,
+            'columns' => [
+                'categoria' => 1,
+                'tamano' => 2,
+                'peso' => 3,
+                'largo' => 4,
+                'ancho' => 5,
+                'profundidad' => 6,
+                'idcat' => false,
+            ],
+        ];
+
+        ADPW_Excel_Save_Category_Meta_Batch_Service::process($job);
+
+        self::assertArrayNotHasKey(ADPW_Category_Metadata_Manager::META_CLASS, $GLOBALS['adpw_test_term_meta'][7]);
+        self::assertSame('1.1', $GLOBALS['adpw_test_term_meta'][7][ADPW_Category_Metadata_Manager::META_WEIGHT]);
+        self::assertSame('2.2', $GLOBALS['adpw_test_term_meta'][7][ADPW_Category_Metadata_Manager::META_HEIGHT]);
+        self::assertSame('3.3', $GLOBALS['adpw_test_term_meta'][7][ADPW_Category_Metadata_Manager::META_WIDTH]);
+        self::assertSame('4.4', $GLOBALS['adpw_test_term_meta'][7][ADPW_Category_Metadata_Manager::META_DEPTH]);
+
+        @unlink($categoriesFile);
+    }
+
     public function testPrepareProductQueueBuildsQueueFromMostSpecificCategory(): void {
         $GLOBALS['adpw_test_posts'] = [501];
         $GLOBALS['adpw_test_post_terms'][501] = [7, 8];

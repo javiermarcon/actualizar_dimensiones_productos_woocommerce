@@ -48,4 +48,22 @@ final class ADPWAjaxHandlerUtilsTest extends TestCase {
             self::assertSame(['error_general' => 'fallo'], $e->payload);
         }
     }
+
+    public function testHandleUnexpectedExceptionWrapsThrowableIntoJsonError(): void {
+        try {
+            ADPW_Ajax_Handler_Utils::handle_unexpected_exception(new RuntimeException('boom'), 'Prefijo: ');
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertFalse($e->success);
+            self::assertSame('Prefijo: boom', $e->payload['error_general']);
+        }
+    }
+
+    public function testHandleUnexpectedExceptionRethrowsCapturedJsonException(): void {
+        $exception = new ADPW_Test_Json_Response_Exception(true, ['ok' => true]);
+
+        $this->expectException(ADPW_Test_Json_Response_Exception::class);
+
+        ADPW_Ajax_Handler_Utils::handle_unexpected_exception($exception, 'Prefijo: ');
+    }
 }

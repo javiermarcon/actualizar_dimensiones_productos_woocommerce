@@ -132,6 +132,9 @@ if (!isset($GLOBALS['adpw_test_posts'])) {
 if (!isset($GLOBALS['adpw_test_post_terms'])) {
     $GLOBALS['adpw_test_post_terms'] = [];
 }
+if (!isset($GLOBALS['adpw_test_post_terms_errors'])) {
+    $GLOBALS['adpw_test_post_terms_errors'] = [];
+}
 if (!isset($GLOBALS['adpw_test_ancestors'])) {
     $GLOBALS['adpw_test_ancestors'] = [];
 }
@@ -167,6 +170,7 @@ if (!function_exists('adpw_test_reset_wp_stubs')) {
         $GLOBALS['adpw_test_term_meta'] = [];
         $GLOBALS['adpw_test_posts'] = [];
         $GLOBALS['adpw_test_post_terms'] = [];
+        $GLOBALS['adpw_test_post_terms_errors'] = [];
         $GLOBALS['adpw_test_ancestors'] = [];
         $GLOBALS['adpw_test_products'] = [];
         $GLOBALS['adpw_test_scheduled_events'] = [];
@@ -519,6 +523,9 @@ if (!function_exists('get_posts')) {
 
 if (!function_exists('wp_get_post_terms')) {
     function wp_get_post_terms(int $post_id, string $taxonomy, array $args = []) {
+        if (isset($GLOBALS['adpw_test_post_terms_errors'][$post_id])) {
+            return $GLOBALS['adpw_test_post_terms_errors'][$post_id];
+        }
         return array_values((array) ($GLOBALS['adpw_test_post_terms'][$post_id] ?? []));
     }
 }

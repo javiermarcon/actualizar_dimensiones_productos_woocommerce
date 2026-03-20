@@ -59,6 +59,28 @@ final class ADPWSettingsAndCategoryStartServicesTest extends TestCase {
         self::assertSame('No se pudo validar la solicitud.', $result['error']);
     }
 
+    public function testSettingsSaveServiceNormalizesPreviouslyCorruptStoredValue(): void {
+        update_option('adpw_import_settings', 'corrupt');
+        $_POST = [
+            'adpw_settings_nonce' => 'nonce',
+            'categorias_por_lote' => '9',
+        ];
+
+        $result = ADPW_Settings_Save_Service::handle_save_request('common', 'adpw_import_settings', 'adpw_settings_nonce', 'adpw_save_settings', [
+            'actualizar_si' => 0,
+            'actualizar_tam' => 0,
+            'actualizar_cat' => 0,
+            'actualizar_productos_desde_categorias' => 0,
+            'categorias_por_lote' => 20,
+        ]);
+
+        $settings = get_option('adpw_import_settings');
+
+        self::assertSame('Configuración guardada correctamente.', $result['mensaje']);
+        self::assertSame(9, $settings['categorias_por_lote']);
+        self::assertSame(0, $settings['actualizar_si']);
+    }
+
     public function testSettingsPageRendererOutputsTreeTabForm(): void {
         ob_start();
         ADPW_Settings_Page_Renderer::render('tree', [

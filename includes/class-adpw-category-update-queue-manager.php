@@ -70,10 +70,7 @@ final class ADPW_Category_Update_Queue_Manager {
 
             ADPW_Ajax_Handler_Utils::success(self::build_summary($job));
         } catch (\Throwable $e) {
-            ADPW_Ajax_Handler_Utils::rethrow_test_json_exception($e);
-            ADPW_Ajax_Handler_Utils::error([
-                'error_general' => 'Excepción en category_update_status: ' . $e->getMessage(),
-            ]);
+            ADPW_Ajax_Handler_Utils::handle_unexpected_exception($e, 'Excepción en category_update_status: ');
         }
     }
 
@@ -87,10 +84,7 @@ final class ADPW_Category_Update_Queue_Manager {
             }
             ADPW_Ajax_Handler_Utils::success($summary);
         } catch (\Throwable $e) {
-            ADPW_Ajax_Handler_Utils::rethrow_test_json_exception($e);
-            ADPW_Ajax_Handler_Utils::error([
-                'error_general' => 'Excepción en category_update_run_batch: ' . $e->getMessage(),
-            ]);
+            ADPW_Ajax_Handler_Utils::handle_unexpected_exception($e, 'Excepción en category_update_run_batch: ');
         }
     }
 

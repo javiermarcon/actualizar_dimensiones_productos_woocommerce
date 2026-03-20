@@ -179,6 +179,12 @@ final class ADPWQueueManagersTest extends TestCase {
         self::assertSame([], $job['product_queue']);
     }
 
+    public function testCategoryUpdateStartJobRejectsEmptyCategoryList(): void {
+        $result = ADPW_Category_Update_Queue_Manager::start_job([], 10);
+
+        self::assertSame('No hay categorías para actualizar en segundo plano.', $result['error_general']);
+    }
+
     public function testImportQueueGetJobSnapshotBuildsUpdateProductsStageSummary(): void {
         update_option('adpw_import_job', [
             'id' => 'job-import',
@@ -445,6 +451,147 @@ final class ADPWQueueManagersTest extends TestCase {
         self::assertSame('completed', $summary['status']);
         self::assertSame(100, $summary['progress']);
         self::assertSame('4.5', $product->get_height());
+    }
+
+    public function testCategoryUpdateProcessBatchIgnoresDifferentJobIdentifier(): void {
+        update_option('adpw_category_update_job', [
+            'id' => 'job-tree',
+            'status' => 'running',
+            'stage' => 'update_products',
+            'product_cursor' => 0,
+            'product_queue' => [[
+                'product_id' => 901,
+                'category_id' => 7,
+            ]],
+            'results' => [
+                'totales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+            'debug_log' => [],
+        ]);
+
+        ADPW_Category_Update_Queue_Manager::process_batch('other-job');
+        $job = get_option('adpw_category_update_job');
+
+        self::assertSame('running', $job['status']);
+        self::assertSame(0, $job['product_cursor']);
+    }
+
+    public function testCategoryUpdateProcessBatchSchedulesNextRunWhileJobKeepsRunning(): void {
+        $productOne = new WC_Product(901, 'Mochila');
+        $productTwo = new WC_Product(902, 'Valija');
+        $GLOBALS['adpw_test_products'][901] = $productOne;
+        $GLOBALS['adpw_test_products'][902] = $productTwo;
+        $GLOBALS['adpw_test_term_meta'][7] = [
+            ADPW_Category_Metadata_Manager::META_HEIGHT => '4.5',
+        ];
+
+        update_option('adpw_category_update_job', [
+            'id' => 'job-tree',
+            'status' => 'running',
+            'stage' => 'update_products',
+            'batch_size' => 1,
+            'product_cursor' => 0,
+            'product_queue' => [
+                [
+                    'product_id' => 901,
+                    'category_id' => 7,
+                ],
+                [
+                    'product_id' => 902,
+                    'category_id' => 7,
+                ],
+            ],
+            'runtime' => [],
+            'results' => [
+                'totales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+            'debug_log' => [],
+        ]);
+
+        ADPW_Category_Update_Queue_Manager::process_batch('job-tree');
+        $job = get_option('adpw_category_update_job');
+
+        self::assertSame('running', $job['status']);
+        self::assertSame(1, $job['product_cursor']);
+        self::assertCount(1, $GLOBALS['adpw_test_scheduled_events']);
+    }
+
+    public function testCategoryUpdateProcessBatchCompletesWithoutSchedulingAnotherRun(): void {
+        $product = new WC_Product(901, 'Mochila');
+        $GLOBALS['adpw_test_products'][901] = $product;
+        $GLOBALS['adpw_test_term_meta'][7] = [
+            ADPW_Category_Metadata_Manager::META_HEIGHT => '4.5',
+        ];
+
+        update_option('adpw_category_update_job', [
+            'id' => 'job-tree',
+            'status' => 'running',
+            'stage' => 'update_products',
+            'batch_size' => 10,
+            'product_cursor' => 0,
+            'product_queue' => [[
+                'product_id' => 901,
+                'category_id' => 7,
+            ]],
+            'runtime' => [],
+            'results' => [
+                'totales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+            'debug_log' => [],
+        ]);
+
+        ADPW_Category_Update_Queue_Manager::process_batch('job-tree');
+        $job = get_option('adpw_category_update_job');
+
+        self::assertSame('completed', $job['status']);
+        self::assertCount(0, $GLOBALS['adpw_test_scheduled_events']);
+    }
+
+    public function testImportQueueProcessBatchCompletesWithoutSchedulingAnotherRun(): void {
+        $categoriesFile = tempnam(sys_get_temp_dir(), 'adpw-cat-');
+        $uploadedFile = tempnam(sys_get_temp_dir(), 'adpw-xlsx-');
+
+        update_option('adpw_import_job', [
+            'id' => 'job-import',
+            'status' => 'running',
+            'stage' => 'update_products',
+            'batch_size' => 10,
+            'product_cursor' => 0,
+            'product_queue' => [],
+            'categories_data_file' => $categoriesFile,
+            'uploaded_file_path' => $uploadedFile,
+            'settings' => [
+                'actualizar_si' => 1,
+                'actualizar_cat' => 0,
+            ],
+            'mode' => [
+                'actualizar_tam_dimensiones' => true,
+                'solo_tamano_desde_excel' => false,
+            ],
+            'results' => [
+                'totales' => 0,
+                'parciales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+            'debug_log' => [],
+        ]);
+
+        ADPW_Import_Queue_Manager::process_batch('job-import');
+        $job = get_option('adpw_import_job');
+
+        self::assertSame('completed', $job['status']);
+        self::assertCount(0, $GLOBALS['adpw_test_scheduled_events']);
     }
 
     private function invokePrivateStaticMethod(string $className, string $methodName, array $args = []) {

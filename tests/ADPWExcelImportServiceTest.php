@@ -64,6 +64,24 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertFalse($index);
     }
 
+    public function testFindHeaderIndexSkipsEmptyHeaders(): void {
+        $index = ADPW_Excel_Import_Support::find_header_index([
+            1 => '',
+            2 => 'descripcion larga',
+        ], ['categoria']);
+
+        self::assertFalse($index);
+    }
+
+    public function testFindHeaderIndexSkipsEmptyNormalizedCandidates(): void {
+        $index = ADPW_Excel_Import_Support::find_header_index([
+            1 => 'sku',
+            2 => 'descripcion larga',
+        ], ['___']);
+
+        self::assertFalse($index);
+    }
+
     public function testGetHeadersNormalizesSpreadsheetHeaderRow(): void {
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
@@ -120,6 +138,12 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertSame([], $ids);
     }
 
+    public function testFindCategoryIdsByNameReturnsEmptyArrayForBlankName(): void {
+        $ids = ADPW_Excel_Import_Support::find_category_ids_by_name('   ');
+
+        self::assertSame([], $ids);
+    }
+
     public function testSupportPrivateHelpersNormalizeAndBuildLookup(): void {
         $term = new WP_Term();
         $term->term_id = 20;
@@ -134,6 +158,47 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertSame('baules grandes', $normalized);
         self::assertSame([20], $lookup['exact']['baules grandes']);
         self::assertSame(20, $lookup['entries'][0]['term_id']);
+    }
+
+    public function testSupportPrivateLookupReturnsCachedValueWithoutReloadingTerms(): void {
+        $cachedLookup = [
+            'exact' => ['baules' => [20]],
+            'entries' => [
+                [
+                    'term_id' => 20,
+                    'normalized_name' => 'baules',
+                ],
+            ],
+        ];
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Support::class, 'product_category_lookup', $cachedLookup);
+        $GLOBALS['adpw_test_terms_errors']['product_cat'] = new WP_Error();
+
+        $lookup = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Support::class, 'get_product_category_lookup');
+
+        self::assertSame($cachedLookup, $lookup);
+    }
+
+    public function testSupportPrivateLookupSkipsInvalidTermsAndKeepsOnlyValidEntries(): void {
+        $invalidMissingName = new stdClass();
+        $invalidMissingName->term_id = 15;
+
+        $invalidEmptyName = new WP_Term();
+        $invalidEmptyName->term_id = 0;
+        $invalidEmptyName->name = '';
+        $invalidEmptyName->taxonomy = 'product_cat';
+
+        $valid = new WP_Term();
+        $valid->term_id = 25;
+        $valid->name = 'Baules';
+        $valid->slug = 'baules';
+        $valid->taxonomy = 'product_cat';
+
+        $GLOBALS['adpw_test_terms'] = [$invalidMissingName, $invalidEmptyName, $valid];
+
+        $lookup = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Support::class, 'get_product_category_lookup');
+
+        self::assertSame([25], $lookup['exact']['baules']);
+        self::assertCount(1, $lookup['entries']);
     }
 
     public function testValidateHeadersReturnsWarningWhenSizeColumnIsMissing(): void {
@@ -374,6 +439,42 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertNotEmpty($results['productos_modificados']);
     }
 
+    public function testProcessProductUpdateRecordsPartialDimensionUpdateAndShippingError(): void {
+        $product = new WC_Product(201, 'Valija');
+        $product->set_weight(1.5);
+        $product->set_length(2.5);
+        $product->set_width(3.5);
+        $GLOBALS['adpw_test_products'][201] = $product;
+
+        $results = [
+            'totales' => 0,
+            'parciales' => 0,
+            'errores' => 0,
+            'detalles' => [],
+            'productos_modificados' => [],
+        ];
+
+        ADPW_Excel_Product_Update_Service::process_product_update(201, [
+            'categoria' => 'Viaje',
+            'tamano' => 'fantasma',
+            'peso' => 0,
+            'largo' => 0,
+            'ancho' => 0,
+            'profundidad' => 4.4,
+        ], [
+            'actualizar_si' => 0,
+            'actualizar_cat' => 1,
+        ], [
+            'actualizar_tam_dimensiones' => true,
+            'solo_tamano_desde_excel' => false,
+        ], $results);
+
+        self::assertSame(1, $results['parciales']);
+        self::assertSame(1, $results['totales']);
+        self::assertStringContainsString('Clase de envío', $results['detalles'][0]);
+        self::assertSame('4.4', $product->get_height());
+    }
+
     public function testReadEntryFromSheetExtractsTypedValues(): void {
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
@@ -444,6 +545,47 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertTrue($job['mode']['actualizar_tam_dimensiones']);
         self::assertFileExists($job['uploaded_file_path']);
         self::assertFileExists($job['categories_data_file']);
+
+        @unlink($job['uploaded_file_path']);
+        @unlink($job['categories_data_file']);
+        @unlink($sourceFile);
+        @rmdir($targetRoot . '/adpw-imports');
+        @rmdir($targetRoot);
+    }
+
+    public function testInitializeJobUsesDefaultXlsxExtensionWhenFileNameHasNoExtension(): void {
+        $sourceFile = $this->createSpreadsheetFile([
+            ['Categoria', 'Peso (kg)'],
+            ['Baules', 10],
+        ]);
+        $targetRoot = sys_get_temp_dir() . '/adpw-tests-' . uniqid('', true);
+        mkdir($targetRoot);
+
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_validator', static function (): bool {
+            return true;
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_mover', static function ($source, $destination): bool {
+            return copy((string) $source, (string) $destination);
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'upload_dir_provider', static function () use ($targetRoot): array {
+            return [
+                'basedir' => $targetRoot,
+                'error' => '',
+            ];
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'mkdir_p_callback', static function ($target): bool {
+            return is_dir((string) $target) || mkdir((string) $target, 0777, true);
+        });
+
+        $job = ADPW_Excel_Import_Service::initialize_job([
+            'tmp_name' => $sourceFile,
+            'name' => 'importacion',
+        ], [
+            'actualizar_tam' => 1,
+            'actualizar_cat' => 0,
+        ], 5);
+
+        self::assertStringEndsWith('.xlsx', $job['uploaded_file_path']);
 
         @unlink($job['uploaded_file_path']);
         @unlink($job['categories_data_file']);
@@ -574,6 +716,135 @@ final class ADPWExcelImportServiceTest extends TestCase {
         @unlink($sourceFile);
         @rmdir($targetRoot . '/adpw-imports');
         @rmdir($targetRoot);
+    }
+
+    public function testInitializeJobReturnsPreparationErrorWhenSpreadsheetCannotBeLoaded(): void {
+        $sourceFile = tempnam(sys_get_temp_dir(), 'adpw-invalid-');
+        file_put_contents($sourceFile, 'no es un excel valido');
+        $targetRoot = sys_get_temp_dir() . '/adpw-tests-' . uniqid('', true);
+        mkdir($targetRoot);
+
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_validator', static function (): bool {
+            return true;
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_mover', static function ($source, $destination): bool {
+            return true;
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'upload_dir_provider', static function () use ($targetRoot): array {
+            return [
+                'basedir' => $targetRoot,
+                'error' => '',
+            ];
+        });
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'mkdir_p_callback', static function ($target): bool {
+            return is_dir((string) $target) || mkdir((string) $target, 0777, true);
+        });
+
+        $result = ADPW_Excel_Import_Service::initialize_job([
+            'tmp_name' => $sourceFile,
+            'name' => 'invalido.xlsx',
+        ], [], 5);
+
+        self::assertStringContainsString('Error preparando el Excel:', $result['error_general']);
+
+        @unlink($sourceFile);
+        @rmdir($targetRoot . '/adpw-imports');
+        @rmdir($targetRoot);
+    }
+
+    public function testImportServicePrivateUploadedFileValidatorUsesNativeFallback(): void {
+        $tempFile = tempnam(sys_get_temp_dir(), 'adpw-upload-');
+
+        $result = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'is_valid_uploaded_file', [$tempFile]);
+
+        self::assertFalse($result);
+        @unlink($tempFile);
+    }
+
+    public function testImportServicePrivateUploadedFileValidatorUsesInjectedCallback(): void {
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_validator', static function (string $path): bool {
+            return $path === '/tmp/custom-upload';
+        });
+
+        $result = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'is_valid_uploaded_file', ['/tmp/custom-upload']);
+
+        self::assertTrue($result);
+    }
+
+    public function testImportServicePrivateFileMoverUsesNativeFallback(): void {
+        $sourceFile = tempnam(sys_get_temp_dir(), 'adpw-source-');
+        $destinationFile = sys_get_temp_dir() . '/adpw-destination-' . uniqid('', true) . '.xlsx';
+
+        $result = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'move_uploaded_file_to_target', [$sourceFile, $destinationFile]);
+
+        self::assertFalse($result);
+        @unlink($sourceFile);
+        @unlink($destinationFile);
+    }
+
+    public function testImportServicePrivateFileMoverUsesInjectedCallback(): void {
+        $sourceFile = tempnam(sys_get_temp_dir(), 'adpw-source-');
+        $destinationFile = sys_get_temp_dir() . '/adpw-destination-' . uniqid('', true) . '.xlsx';
+
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'uploaded_file_mover', static function (string $source, string $destination): bool {
+            return copy($source, $destination);
+        });
+
+        $result = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'move_uploaded_file_to_target', [$sourceFile, $destinationFile]);
+
+        self::assertTrue($result);
+        self::assertFileExists($destinationFile);
+        @unlink($sourceFile);
+        @unlink($destinationFile);
+    }
+
+    public function testImportServicePrivateUploadDirUsesProviderCallback(): void {
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'upload_dir_provider', static function (): array {
+            return [
+                'basedir' => '/tmp/custom-basedir',
+                'error' => '',
+            ];
+        });
+
+        $uploadDir = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'get_upload_dir');
+
+        self::assertSame('/tmp/custom-basedir', $uploadDir['basedir']);
+    }
+
+    public function testImportServicePrivateUploadDirReturnsEmptyArrayForInvalidProviderResponse(): void {
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'upload_dir_provider', static function () {
+            return 'invalid';
+        });
+
+        $uploadDir = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'get_upload_dir');
+
+        self::assertSame([], $uploadDir);
+    }
+
+    public function testImportServicePrivateUploadDirUsesWordPressFallbackWhenNoProviderExists(): void {
+        $uploadDir = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'get_upload_dir');
+
+        self::assertSame(sys_get_temp_dir(), $uploadDir['basedir']);
+        self::assertSame('', $uploadDir['error']);
+    }
+
+    public function testImportServicePrivateCreateDirectoryUsesNativeFallback(): void {
+        $targetDir = sys_get_temp_dir() . '/adpw-mkdir-' . uniqid('', true);
+
+        $result = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'create_directory', [$targetDir]);
+
+        self::assertTrue($result);
+        @rmdir($targetDir);
+    }
+
+    public function testImportServicePrivateCreateDirectoryUsesCallbackResult(): void {
+        $this->setPrivateStaticProperty(ADPW_Excel_Import_Service::class, 'mkdir_p_callback', static function (): bool {
+            return false;
+        });
+
+        $result = $this->invokePrivateStaticMethod(ADPW_Excel_Import_Service::class, 'create_directory', ['/tmp/ignored']);
+
+        self::assertFalse($result);
     }
 
     public function testIsEmptyEntryRecognizesEmptyAndNonEmptyRows(): void {
@@ -909,10 +1180,26 @@ final class ADPWExcelImportServiceTest extends TestCase {
         self::assertSame(['uno'], $messages);
     }
 
+    public function testProductUpdateAppendLimitedInitializesMissingTargetArray(): void {
+        $messages = null;
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Product_Update_Service::class, 'append_limited', [&$messages, 'uno', 2]);
+
+        self::assertSame(['uno'], $messages);
+    }
+
     public function testSupportAppendLimitedStopsAtConfiguredLimit(): void {
         $messages = ['uno'];
 
         $this->invokePrivateStaticMethod(ADPW_Excel_Import_Support::class, 'append_limited', [&$messages, 'dos', 1]);
+
+        self::assertSame(['uno'], $messages);
+    }
+
+    public function testSupportAppendLimitedInitializesMissingTargetArray(): void {
+        $messages = null;
+
+        $this->invokePrivateStaticMethod(ADPW_Excel_Import_Support::class, 'append_limited', [&$messages, 'uno', 2]);
 
         self::assertSame(['uno'], $messages);
     }

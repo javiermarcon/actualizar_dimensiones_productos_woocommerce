@@ -20,7 +20,6 @@ final class ADPW_Excel_Product_Update_Service {
             'modificado' => false,
             'actualizacion_total' => false,
             'log_producto' => '',
-            'detalles_errores' => '',
         ];
         $clase_modificada = false;
 
@@ -53,9 +52,6 @@ final class ADPW_Excel_Product_Update_Service {
             }
             if (!empty($dim_res['log_producto'])) {
                 self::append_limited($results['productos_modificados'], $dim_res['log_producto']);
-            }
-            if (!empty($dim_res['detalles_errores'])) {
-                self::append_limited($results['detalles'], $dim_res['detalles_errores']);
             }
         }
 
@@ -111,7 +107,6 @@ final class ADPW_Excel_Product_Update_Service {
             'modificado' => $modificado,
             'actualizacion_total' => $actualizacion_total,
             'log_producto' => $log_producto,
-            'detalles_errores' => '',
         ];
     }
 

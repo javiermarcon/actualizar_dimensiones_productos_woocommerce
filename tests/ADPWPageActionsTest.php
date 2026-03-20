@@ -117,6 +117,70 @@ final class ADPWPageActionsTest extends TestCase {
         self::assertSame([], $result['start_error_details']);
     }
 
+    public function testExcelImportPageActionsIncludeDetailsAndDebugLinesFromFailedStart(): void {
+        $uploadedFile = $this->createSpreadsheetFile([
+            ['SKU'],
+            ['ABC123'],
+        ]);
+
+        $serviceReflection = new ReflectionClass(ADPW_Excel_Import_Service::class);
+        $validator = $serviceReflection->getProperty('uploaded_file_validator');
+        $validator->setAccessible(true);
+        $validator->setValue(null, static fn (): bool => true);
+
+        $mover = $serviceReflection->getProperty('uploaded_file_mover');
+        $mover->setAccessible(true);
+        $mover->setValue(null, static function (string $from, string $to): bool {
+            return copy($from, $to);
+        });
+
+        $uploadDirProvider = $serviceReflection->getProperty('upload_dir_provider');
+        $uploadDirProvider->setAccessible(true);
+        $uploadDirProvider->setValue(null, static function (): array {
+            return [
+                'basedir' => sys_get_temp_dir(),
+                'baseurl' => 'http://example.test/uploads',
+                'error' => '',
+            ];
+        });
+
+        $mkdirProvider = $serviceReflection->getProperty('mkdir_p_callback');
+        $mkdirProvider->setAccessible(true);
+        $mkdirProvider->setValue(null, static fn (string $path): bool => is_dir($path) || mkdir($path, 0777, true));
+
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_POST = [
+            'adpw_start_import_form_nonce' => 'nonce',
+        ];
+        $_FILES = [
+            'archivo_excel' => [
+                'name' => 'invalid.xlsx',
+                'tmp_name' => $uploadedFile,
+                'size' => filesize($uploadedFile),
+                'error' => 0,
+            ],
+        ];
+
+        $result = ADPW_Excel_Import_Page_Actions::handle_requests(
+            ['categorias_por_lote' => 5, 'actualizar_tam' => 1, 'actualizar_cat' => 0],
+            'adpw_start_import_form',
+            'adpw_start_import_form_nonce',
+            'adpw_manual_batch',
+            'adpw_manual_batch_nonce'
+        );
+
+        self::assertSame('No se encontraron los encabezados esperados en el archivo Excel.', $result['start_error']);
+        self::assertNotEmpty($result['start_error_details']);
+        self::assertStringContainsString('Incluí al menos:', $result['start_error_details'][0]);
+        self::assertStringContainsString('debug:', implode("\n", $result['start_error_details']));
+
+        $validator->setValue(null, null);
+        $mover->setValue(null, null);
+        $uploadDirProvider->setValue(null, null);
+        $mkdirProvider->setValue(null, null);
+        @unlink($uploadedFile);
+    }
+
     public function testExcelImportPageActionsStartSuccessfulImport(): void {
         $uploadedFile = $this->createSpreadsheetFile([
             ['Categoria', 'Tamano', 'Peso', 'Ancho', 'Largo', 'Profundidad'],

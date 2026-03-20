@@ -37,25 +37,16 @@ final class ADPW_Import_Queue_Manager {
     }
 
     public static function start_import_job($file, $settings) {
-        $batch_size = max(1, (int) ($settings['categorias_por_lote'] ?? 20));
-        $init = ADPW_Excel_Import_Service::initialize_job($file, $settings, $batch_size);
-        if (!empty($init['error_general'])) {
-            return [
-                'error_general' => $init['error_general'],
-                'detalles' => isset($init['detalles']) && is_array($init['detalles']) ? $init['detalles'] : [],
-                'debug_lines' => isset($init['debug_lines']) && is_array($init['debug_lines']) ? $init['debug_lines'] : [],
-            ];
+        $start = ADPW_Import_Start_Service::start($file, $settings);
+        if (!empty($start['error_general'])) {
+            return $start;
         }
 
-        $job = ADPW_Import_Job_Factory::create_job($init, $settings);
+        $job = $start['job'];
         self::save_job($job);
         self::schedule_next_batch($job['id']);
 
-        return [
-            'job_id' => $job['id'],
-            'stage' => $job['stage'],
-            'batch_size' => $job['batch_size'],
-        ];
+        return $start['response'];
     }
 
     public static function ajax_start_import() {
@@ -71,10 +62,7 @@ final class ADPW_Import_Queue_Manager {
             }
             ADPW_Ajax_Handler_Utils::success($start);
         } catch (\Throwable $e) {
-            ADPW_Ajax_Handler_Utils::rethrow_test_json_exception($e);
-            ADPW_Ajax_Handler_Utils::error([
-                'error_general' => 'Excepción en start_import: ' . $e->getMessage(),
-            ]);
+            ADPW_Ajax_Handler_Utils::handle_unexpected_exception($e, 'Excepción en start_import: ');
         }
     }
 
@@ -94,10 +82,7 @@ final class ADPW_Import_Queue_Manager {
 
             ADPW_Ajax_Handler_Utils::success(self::build_summary($job));
         } catch (\Throwable $e) {
-            ADPW_Ajax_Handler_Utils::rethrow_test_json_exception($e);
-            ADPW_Ajax_Handler_Utils::error([
-                'error_general' => 'Excepción en import_status: ' . $e->getMessage(),
-            ]);
+            ADPW_Ajax_Handler_Utils::handle_unexpected_exception($e, 'Excepción en import_status: ');
         }
     }
 
@@ -111,10 +96,7 @@ final class ADPW_Import_Queue_Manager {
             }
             ADPW_Ajax_Handler_Utils::success($summary);
         } catch (\Throwable $e) {
-            ADPW_Ajax_Handler_Utils::rethrow_test_json_exception($e);
-            ADPW_Ajax_Handler_Utils::error([
-                'error_general' => 'Excepción en run_batch: ' . $e->getMessage(),
-            ]);
+            ADPW_Ajax_Handler_Utils::handle_unexpected_exception($e, 'Excepción en run_batch: ');
         }
     }
 

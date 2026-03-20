@@ -197,6 +197,24 @@ final class ADPWSettingsAndPagesTest extends TestCase {
         self::assertStringContainsString('No tenés permisos para guardar configuración.', $html);
     }
 
+    public function testSettingsRenderPageShowsSuccessNoticeWhenSaveSucceeds(): void {
+        $_REQUEST = [
+            'tab' => 'common',
+        ];
+        $_POST = [
+            'adpw_save_settings' => '1',
+            'adpw_settings_nonce' => 'nonce',
+            'categorias_por_lote' => '15',
+        ];
+
+        ob_start();
+        ADPW_Settings::render_page();
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('Configuración guardada correctamente.', $html);
+        self::assertStringContainsString('notice-success', $html);
+    }
+
     public function testExcelImportPageRenderShowsManualBatchErrorWhenNoJobExists(): void {
         $_POST = [
             'adpw_run_manual_batch' => '1',
@@ -218,6 +236,56 @@ final class ADPWSettingsAndPagesTest extends TestCase {
         $html = (string) ob_get_clean();
 
         self::assertStringContainsString('No se pudieron cargar categorías o clases de envío.', $html);
+    }
+
+    public function testCategoryMetadataPageRenderShowsSaveErrorNotice(): void {
+        $GLOBALS['adpw_test_terms_errors']['product_shipping_class'] = new WP_Error();
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_POST = [
+            'guardar_metadata_por_categoria_nonce' => 'nonce',
+            'metadata_categoria' => [
+                12 => [
+                    'clase_envio' => 'premium',
+                ],
+            ],
+        ];
+
+        ob_start();
+        ADPW_Category_Metadata_Page::render_page();
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('No se pudieron validar las clases de envío disponibles.', $html);
+        self::assertStringContainsString('notice notice-error', $html);
+    }
+
+    public function testCategoryMetadataPageRenderShowsSaveSuccessAndProductDetail(): void {
+        update_option('adpw_import_settings', [
+            'actualizar_productos_desde_categorias' => 1,
+            'categorias_por_lote' => 5,
+        ]);
+
+        $category = $this->createTerm(12, 'Accesorios', 'accesorios', 'product_cat');
+        $shippingClass = $this->createTerm(90, 'Premium', 'premium', 'product_shipping_class');
+        $GLOBALS['adpw_test_terms'] = [$category, $shippingClass];
+
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_POST = [
+            'guardar_metadata_por_categoria_nonce' => 'nonce',
+            'metadata_categoria' => [
+                12 => [
+                    'clase_envio' => 'premium',
+                    'peso' => '1.25',
+                ],
+            ],
+        ];
+
+        ob_start();
+        ADPW_Category_Metadata_Page::render_page();
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('Se actualizaron 1 categorías.', $html);
+        self::assertStringContainsString('No hay productos afectados para actualizar.', $html);
+        self::assertStringContainsString('notice notice-success', $html);
     }
 
     public function testCategoryMetadataPageRenderShowsSuccessNoticeForManualBatch(): void {
@@ -353,6 +421,17 @@ final class ADPWSettingsAndPagesTest extends TestCase {
         self::assertStringContainsString('adpw-category-metadata-form', $html);
         self::assertStringContainsString('adpw-metadata-delta-container', $html);
         self::assertStringContainsString('adpw_no_changes', $html);
+    }
+
+    private function createTerm(int $termId, string $name, string $slug, string $taxonomy, int $parent = 0): WP_Term {
+        $term = new WP_Term();
+        $term->term_id = $termId;
+        $term->name = $name;
+        $term->slug = $slug;
+        $term->taxonomy = $taxonomy;
+        $term->parent = $parent;
+
+        return $term;
     }
 
     private function invokePrivateStaticMethod(string $className, string $methodName, array $args = []) {

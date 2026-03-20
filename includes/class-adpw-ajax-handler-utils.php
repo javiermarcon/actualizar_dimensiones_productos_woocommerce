@@ -32,6 +32,13 @@ final class ADPW_Ajax_Handler_Utils {
         }
     }
 
+    public static function handle_unexpected_exception($e, $prefix) {
+        self::rethrow_test_json_exception($e);
+        self::error([
+            'error_general' => $prefix . $e->getMessage(),
+        ]);
+    }
+
     public static function idle_payload() {
         return [
             'status' => 'idle',

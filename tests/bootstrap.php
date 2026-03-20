@@ -14,6 +14,7 @@ require_once dirname(__DIR__) . '/includes/class-adpw-ajax-handler-utils.php';
 require_once dirname(__DIR__) . '/includes/class-adpw-import-job-store.php';
 require_once dirname(__DIR__) . '/includes/class-adpw-import-job-summary.php';
 require_once dirname(__DIR__) . '/includes/class-adpw-import-job-factory.php';
+require_once dirname(__DIR__) . '/includes/class-adpw-import-start-service.php';
 require_once dirname(__DIR__) . '/includes/class-adpw-import-batch-runner.php';
 require_once dirname(__DIR__) . '/includes/class-adpw-settings-save-service.php';
 require_once dirname(__DIR__) . '/includes/class-adpw-settings-page-renderer.php';

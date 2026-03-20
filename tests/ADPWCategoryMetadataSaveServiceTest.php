@@ -97,4 +97,54 @@ final class ADPWCategoryMetadataSaveServiceTest extends TestCase {
         self::assertSame('Se actualizaron 1 categorías.', $result['mensaje']);
         self::assertSame('No hay productos afectados para actualizar.', $result['detalle_productos']);
     }
+
+    public function testSaveFromRequestSkipsInvalidCategoryIdentifiers(): void {
+        $shippingTerm = new WP_Term();
+        $shippingTerm->term_id = 90;
+        $shippingTerm->slug = 'premium';
+        $shippingTerm->name = 'Premium';
+        $shippingTerm->taxonomy = 'product_shipping_class';
+        $GLOBALS['adpw_test_terms'] = [$shippingTerm];
+
+        $result = ADPW_Category_Metadata_Save_Service::save_from_request([
+            0 => [
+                'clase_envio' => 'premium',
+            ],
+            12 => [
+                'clase_envio' => 'premium',
+            ],
+        ], [
+            'actualizar_productos_desde_categorias' => 0,
+        ]);
+
+        self::assertSame('Se actualizaron 1 categorías.', $result['mensaje']);
+        self::assertArrayNotHasKey(0, $GLOBALS['adpw_test_term_meta']);
+        self::assertArrayHasKey(12, $GLOBALS['adpw_test_term_meta']);
+    }
+
+    public function testSaveFromRequestReportsBackgroundJobErrors(): void {
+        $shippingTerm = new WP_Term();
+        $shippingTerm->term_id = 90;
+        $shippingTerm->slug = 'premium';
+        $shippingTerm->name = 'Premium';
+        $shippingTerm->taxonomy = 'product_shipping_class';
+        $GLOBALS['adpw_test_terms'] = [$shippingTerm];
+
+        update_option('adpw_category_update_job', [
+            'id' => 'job-tree',
+            'status' => 'running',
+        ]);
+
+        $result = ADPW_Category_Metadata_Save_Service::save_from_request([
+            12 => [
+                'clase_envio' => 'premium',
+            ],
+        ], [
+            'actualizar_productos_desde_categorias' => 1,
+            'categorias_por_lote' => 5,
+        ]);
+
+        self::assertSame('Se actualizaron 1 categorías.', $result['mensaje']);
+        self::assertStringContainsString('Ya hay una actualización del árbol en ejecución', $result['detalle_productos']);
+    }
 }

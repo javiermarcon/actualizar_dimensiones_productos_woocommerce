@@ -50,6 +50,18 @@ final class ADPWAjaxAndRenderTest extends TestCase {
         }
     }
 
+    public function testImportAjaxStatusRejectsUserWithoutPermissions(): void {
+        $GLOBALS['adpw_test_current_user_can'] = false;
+
+        try {
+            ADPW_Import_Queue_Manager::ajax_import_status();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertFalse($e->success);
+            self::assertSame('No tenés permisos para consultar estado.', $e->payload['message']);
+        }
+    }
+
     public function testImportAjaxRunBatchReturnsErrorWhenNoJobIsRunning(): void {
         try {
             ADPW_Import_Queue_Manager::ajax_run_batch();
@@ -72,6 +84,18 @@ final class ADPWAjaxAndRenderTest extends TestCase {
         }
     }
 
+    public function testImportAjaxRunBatchRejectsInvalidNonce(): void {
+        $GLOBALS['adpw_test_check_ajax_referer'] = false;
+
+        try {
+            ADPW_Import_Queue_Manager::ajax_run_batch();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertFalse($e->success);
+            self::assertSame('Nonce inválido.', $e->payload['message']);
+        }
+    }
+
     public function testImportAjaxStartImportRejectsUserWithoutPermissions(): void {
         $GLOBALS['adpw_test_current_user_can'] = false;
 
@@ -81,6 +105,29 @@ final class ADPWAjaxAndRenderTest extends TestCase {
         } catch (ADPW_Test_Json_Response_Exception $e) {
             self::assertFalse($e->success);
             self::assertSame('No tenés permisos para iniciar la importación.', $e->payload['message']);
+        }
+    }
+
+    public function testImportAjaxStartImportRejectsInvalidNonce(): void {
+        $GLOBALS['adpw_test_check_ajax_referer'] = false;
+
+        try {
+            ADPW_Import_Queue_Manager::ajax_start_import();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertFalse($e->success);
+            self::assertSame('Nonce inválido.', $e->payload['message']);
+        }
+    }
+
+    public function testImportAjaxStartImportReturnsInitializationErrorPayload(): void {
+        try {
+            ADPW_Import_Queue_Manager::ajax_start_import();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertFalse($e->success);
+            self::assertSame('No se seleccionó ningún archivo válido.', $e->payload['error_general']);
+            self::assertSame([], $e->payload['detalles']);
         }
     }
 
@@ -159,6 +206,18 @@ final class ADPWAjaxAndRenderTest extends TestCase {
         }
     }
 
+    public function testCategoryUpdateAjaxRunBatchRejectsUserWithoutPermissions(): void {
+        $GLOBALS['adpw_test_current_user_can'] = false;
+
+        try {
+            ADPW_Category_Update_Queue_Manager::ajax_run_batch();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertFalse($e->success);
+            self::assertSame('No tenés permisos para ejecutar lotes.', $e->payload['message']);
+        }
+    }
+
     public function testCategoryUpdateAjaxRunBatchRejectsInvalidNonce(): void {
         $GLOBALS['adpw_test_check_ajax_referer'] = false;
 
@@ -180,6 +239,18 @@ final class ADPWAjaxAndRenderTest extends TestCase {
         } catch (ADPW_Test_Json_Response_Exception $e) {
             self::assertFalse($e->success);
             self::assertSame('No tenés permisos para consultar estado.', $e->payload['message']);
+        }
+    }
+
+    public function testCategoryUpdateAjaxStatusRejectsInvalidNonce(): void {
+        $GLOBALS['adpw_test_check_ajax_referer'] = false;
+
+        try {
+            ADPW_Category_Update_Queue_Manager::ajax_status();
+            self::fail('Expected JSON response exception.');
+        } catch (ADPW_Test_Json_Response_Exception $e) {
+            self::assertFalse($e->success);
+            self::assertSame('Nonce inválido.', $e->payload['message']);
         }
     }
 
@@ -205,6 +276,174 @@ final class ADPWAjaxAndRenderTest extends TestCase {
         self::assertStringContainsString('Importar Excel', $html);
         self::assertStringContainsString('adpw-import-form', $html);
         self::assertStringContainsString('Procesar siguiente lote ahora', $html);
+    }
+
+    public function testExcelImportPageRenderShowsStartErrorBox(): void {
+        $uploadedFile = $this->createSpreadsheetFile([
+            ['SKU'],
+            ['ABC123'],
+        ]);
+
+        $serviceReflection = new ReflectionClass(ADPW_Excel_Import_Service::class);
+        $validator = $serviceReflection->getProperty('uploaded_file_validator');
+        $validator->setAccessible(true);
+        $validator->setValue(null, static fn (): bool => true);
+
+        $mover = $serviceReflection->getProperty('uploaded_file_mover');
+        $mover->setAccessible(true);
+        $mover->setValue(null, static function (string $from, string $to): bool {
+            return copy($from, $to);
+        });
+
+        $uploadDirProvider = $serviceReflection->getProperty('upload_dir_provider');
+        $uploadDirProvider->setAccessible(true);
+        $uploadDirProvider->setValue(null, static function (): array {
+            return [
+                'basedir' => sys_get_temp_dir(),
+                'baseurl' => 'http://example.test/uploads',
+                'error' => '',
+            ];
+        });
+
+        $mkdirProvider = $serviceReflection->getProperty('mkdir_p_callback');
+        $mkdirProvider->setAccessible(true);
+        $mkdirProvider->setValue(null, static fn (string $path): bool => is_dir($path) || mkdir($path, 0777, true));
+
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_POST = [
+            'adpw_start_import_form_nonce' => 'nonce',
+        ];
+        $_FILES = [
+            'archivo_excel' => [
+                'name' => 'invalid.xlsx',
+                'tmp_name' => $uploadedFile,
+                'size' => filesize($uploadedFile),
+                'error' => 0,
+            ],
+        ];
+
+        ob_start();
+        ADPW_Excel_Import_Page::render_page();
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('Error', $html);
+        self::assertStringContainsString('No se encontraron los encabezados esperados en el archivo Excel.', $html);
+
+        $validator->setValue(null, null);
+        $mover->setValue(null, null);
+        $uploadDirProvider->setValue(null, null);
+        $mkdirProvider->setValue(null, null);
+        @unlink($uploadedFile);
+    }
+
+    public function testExcelImportPageRenderShowsManualBatchMessage(): void {
+        $shippingTerm = new WP_Term();
+        $shippingTerm->term_id = 11;
+        $shippingTerm->slug = 'premium';
+        $shippingTerm->name = 'Premium';
+        $shippingTerm->taxonomy = 'product_shipping_class';
+        $GLOBALS['adpw_test_terms'] = [$shippingTerm];
+
+        $categoriesFile = tempnam(sys_get_temp_dir(), 'adpw-cat-');
+        file_put_contents($categoriesFile, json_encode([
+            '7' => [
+                'tamano' => 'premium',
+                'peso' => '1',
+                'ancho' => '2',
+                'largo' => '3',
+                'profundidad' => '4',
+            ],
+        ]));
+
+        update_option('adpw_import_job', [
+            'id' => 'job-import',
+            'status' => 'running',
+            'stage' => 'save_category_meta',
+            'batch_size' => 10,
+            'category_cursor' => 0,
+            'category_ids' => [7],
+            'categories_data_file' => $categoriesFile,
+            'results' => [
+                'totales' => 0,
+                'parciales' => 0,
+                'errores' => 0,
+                'detalles' => [],
+                'productos_modificados' => [],
+            ],
+            'debug_log' => [],
+        ]);
+
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_POST = [
+            'adpw_run_manual_batch' => '1',
+            'adpw_manual_batch_nonce' => 'nonce',
+        ];
+
+        ob_start();
+        ADPW_Excel_Import_Page::render_page();
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('Batch Manual', $html);
+        self::assertStringContainsString('Se ejecutó manualmente un lote de importación.', $html);
+
+        @unlink($categoriesFile);
+    }
+
+    public function testExcelImportPageRenderShowsStartMessage(): void {
+        $uploadedFile = $this->createSpreadsheetFile([
+            ['Categoria', 'Tamano', 'Peso', 'Ancho', 'Largo', 'Profundidad'],
+            ['Cascos', 'premium', '1', '2', '3', '4'],
+        ]);
+
+        $serviceReflection = new ReflectionClass(ADPW_Excel_Import_Service::class);
+        $validator = $serviceReflection->getProperty('uploaded_file_validator');
+        $validator->setAccessible(true);
+        $validator->setValue(null, static fn (): bool => true);
+
+        $mover = $serviceReflection->getProperty('uploaded_file_mover');
+        $mover->setAccessible(true);
+        $mover->setValue(null, static function (string $from, string $to): bool {
+            return copy($from, $to);
+        });
+
+        $uploadDirProvider = $serviceReflection->getProperty('upload_dir_provider');
+        $uploadDirProvider->setAccessible(true);
+        $uploadDirProvider->setValue(null, static function (): array {
+            return [
+                'basedir' => sys_get_temp_dir(),
+                'baseurl' => 'http://example.test/uploads',
+            ];
+        });
+
+        $mkdirProvider = $serviceReflection->getProperty('mkdir_p_callback');
+        $mkdirProvider->setAccessible(true);
+        $mkdirProvider->setValue(null, static fn (string $path): bool => is_dir($path) || mkdir($path, 0777, true));
+
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_POST = [
+            'adpw_start_import_form_nonce' => 'nonce',
+        ];
+        $_FILES = [
+            'archivo_excel' => [
+                'name' => 'import.xlsx',
+                'tmp_name' => $uploadedFile,
+                'size' => filesize($uploadedFile),
+                'error' => 0,
+            ],
+        ];
+
+        ob_start();
+        ADPW_Excel_Import_Page::render_page();
+        $html = (string) ob_get_clean();
+
+        self::assertStringContainsString('Inicio', $html);
+        self::assertStringContainsString('Importación iniciada en segundo plano. Job ID:', $html);
+
+        $validator->setValue(null, null);
+        $mover->setValue(null, null);
+        $uploadDirProvider->setValue(null, null);
+        $mkdirProvider->setValue(null, null);
+        @unlink($uploadedFile);
     }
 
     public function testCategoryMetadataPageRenderShowsEmptyMessageWhenThereAreNoCategories(): void {

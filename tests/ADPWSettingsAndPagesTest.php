@@ -366,6 +366,8 @@ final class ADPWSettingsAndPagesTest extends TestCase {
         $category = new WP_Term();
         $category->term_id = 12;
         $category->name = 'Cascos';
+        $category->slug = 'cascos';
+        $category->count = 34;
         $category->taxonomy = 'product_cat';
 
         $shippingClass = new WP_Term();
@@ -393,6 +395,9 @@ final class ADPWSettingsAndPagesTest extends TestCase {
 
         self::assertStringContainsString('Cascos', $html);
         self::assertStringContainsString('padding-left:20px', $html);
+        self::assertStringContainsString('(34)', $html);
+        self::assertStringContainsString('<a href="edit.php?post_type=product&product_cat=cascos">Cascos</a>', $html);
+        self::assertStringContainsString('edit.php?post_type=product&product_cat=cascos', $html);
         self::assertStringContainsString('metadata_categoria[12][clase_envio]', $html);
         self::assertStringContainsString('option value="premium" selected="selected"', $html);
         self::assertStringContainsString('metadata_categoria[12][peso]', $html);

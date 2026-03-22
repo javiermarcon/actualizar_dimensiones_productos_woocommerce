@@ -30,6 +30,7 @@ if (!class_exists('WP_Term')) {
         public string $name = '';
         public string $slug = '';
         public int $parent = 0;
+        public int $count = 0;
         public string $taxonomy = '';
     }
 }

@@ -139,13 +139,17 @@ final class ADPW_Category_Metadata_Page {
         foreach ($categories_by_parent[$parent_id] as $category) {
             $category_id = (int) $category->term_id;
             $meta = ADPW_Category_Metadata_Manager::get_category_meta_values($category_id);
+            $product_count = isset($category->count) ? (int) $category->count : 0;
+            $category_slug = isset($category->slug) ? (string) $category->slug : '';
+            $category_link = admin_url('edit.php?post_type=product&product_cat=' . rawurlencode($category_slug));
 
             echo '<tr>';
             echo '<td><span style="display:inline-block;padding-left:' . esc_attr((string) ($level * 20)) . 'px;">';
             if ($level > 0) {
                 echo esc_html(str_repeat('└ ', min(1, $level)));
             }
-            echo esc_html($category->name) . '</span></td>';
+            echo '<a href="' . esc_url($category_link) . '">' . esc_html($category->name) . '</a></span>';
+            echo ' <span style="color:#50575e;">(' . esc_html((string) $product_count) . ')</span></td>';
 
             echo '<td><select class="adpw-meta-input" name="' . esc_attr(self::POST_FIELD_METADATA) . '[' . esc_attr((string) $category_id) . '][clase_envio]" data-category-id="' . esc_attr((string) $category_id) . '" data-field="clase_envio" data-original="' . esc_attr($meta['clase_envio']) . '">';
             echo '<option value="">Sin clase</option>';
